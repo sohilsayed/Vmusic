@@ -70,7 +70,7 @@ class VideoDetailsViewModel @Inject constructor(
         if (videoId.isNotBlank()) {
             viewModelScope.launch {
                 _isLoading.value = true
-                val prefetchedItem = videoListViewModel.videoItemForDetailScreen.value
+                val prefetchedItem = videoListViewModel.videoItemForDetailScreen
 
                 val isPrefetchedItemComplete = prefetchedItem != null &&
                         prefetchedItem.id == videoId &&

@@ -53,11 +53,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.example.holodex.R
-import com.example.holodex.ui.AppDestinations
 import com.example.holodex.ui.composables.CustomPagedUnifiedList
 import com.example.holodex.ui.composables.EmptyState
 import com.example.holodex.ui.composables.LoadingSkeleton
 import com.example.holodex.ui.composables.sheets.BrowseFiltersSheet
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.viewmodel.FavoritesViewModel
 import com.example.holodex.viewmodel.MusicCategoryType
 import com.example.holodex.viewmodel.PlaylistManagementViewModel

@@ -8,7 +8,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.example.holodex.R
-import com.example.holodex.ui.AppDestinations
+import com.example.holodex.ui.navigation.AppDestinations
 
 sealed class BottomNavItem(
     val route: String,
@@ -20,16 +20,19 @@ sealed class BottomNavItem(
         titleResId = R.string.bottom_nav_discover, // Add string
         icon = Icons.Filled.Explore
     )
+
     object Browse : BottomNavItem(
         route = AppDestinations.HOME_ROUTE,
         titleResId = R.string.bottom_nav_browse,
         icon = Icons.Filled.Search
     )
+
     object Library : BottomNavItem(
         route = AppDestinations.LIBRARY_ROUTE,
         titleResId = R.string.bottom_nav_library,
         icon = Icons.Filled.LibraryMusic
     )
+
     object Downloads : BottomNavItem(
         route = AppDestinations.DOWNLOADS_ROUTE,
         titleResId = R.string.bottom_nav_downloads,

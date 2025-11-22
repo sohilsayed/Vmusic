@@ -48,7 +48,7 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.holodex.R
-import com.example.holodex.ui.AppDestinations
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.viewmodel.DownloadsViewModel
 import com.example.holodex.viewmodel.FavoritesViewModel
 import com.example.holodex.viewmodel.PlaylistManagementViewModel

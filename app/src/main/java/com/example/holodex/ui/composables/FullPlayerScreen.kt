@@ -120,7 +120,7 @@ import coil.request.ImageRequest
 import com.example.holodex.R
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.playback.util.formatDurationSecondsToString
-import com.example.holodex.ui.AppDestinations
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.util.ThumbnailQuality
 import com.example.holodex.util.generateArtworkUrlList
 import com.example.holodex.viewmodel.FavoritesViewModel

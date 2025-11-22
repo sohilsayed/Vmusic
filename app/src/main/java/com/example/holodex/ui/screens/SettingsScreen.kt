@@ -73,8 +73,8 @@ import com.example.holodex.BuildConfig
 import com.example.holodex.R
 import com.example.holodex.auth.AuthState
 import com.example.holodex.auth.AuthViewModel
-import com.example.holodex.ui.AppDestinations
 import com.example.holodex.ui.composables.ApiKeyInputScreen
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.viewmodel.AppPreferenceConstants
 import com.example.holodex.viewmodel.ScanStatus
 import com.example.holodex.viewmodel.SettingsViewModel

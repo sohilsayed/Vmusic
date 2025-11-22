@@ -1,40 +1,50 @@
-// File: java/com/example/holodex/viewmodel/FullListViewModel.kt
-
 package com.example.holodex.viewmodel
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import com.example.holodex.data.model.discovery.DiscoveryChannel
 import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.viewmodel.VideoListViewModel.ListStateHolder
-import com.example.holodex.viewmodel.VideoListViewModel.MusicCategoryType
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toVideoShell
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import org.orbitmvi.orbit.Container
+import org.orbitmvi.orbit.ContainerHost
+import org.orbitmvi.orbit.viewmodel.container
 import timber.log.Timber
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 
+// --- STATE & SIDE EFFECT DEFINITIONS ---
+
+data class FullListState(
+    val items: List<Any> = emptyList(),
+    val isLoadingInitial: Boolean = true,
+    val isLoadingMore: Boolean = false,
+    val endOfList: Boolean = false,
+    val currentOffset: Int = 0
+)
+
+sealed class FullListSideEffect {
+    data class ShowToast(val message: String) : FullListSideEffect()
+}
+
+// ---------------------------------------
 
 @UnstableApi
 @HiltViewModel
-class FullListViewModel
-@Inject constructor(
+class FullListViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val holodexRepository: HolodexRepository,
     private val downloadRepository: DownloadRepository
-) : ViewModel() {
+) : ContainerHost<FullListState, FullListSideEffect>, ViewModel() {
 
     companion object {
         const val CATEGORY_TYPE_ARG = "category"
         const val ORG_ARG = "org"
-        private const val TAG = "FullListViewModel"
         private const val PAGE_SIZE = 50
     }
 
@@ -46,160 +56,123 @@ class FullListViewModel
         StandardCharsets.UTF_8.toString()
     )
 
-    val listState = ListStateHolder<Any>()
-
-    init {
-        Timber.d("$TAG: Initialized for category: $categoryType, org: $organization")
+    override val container: Container<FullListState, FullListSideEffect> = container(FullListState()) {
         loadMore(isInitialLoad = true)
     }
 
-    fun loadMore(isInitialLoad: Boolean = false) {
-        if (listState.isLoadingMore.value || listState.endOfList.value) return
+    fun loadMore(isInitialLoad: Boolean = false) = intent {
+        if (!isInitialLoad && (state.isLoadingMore || state.endOfList)) return@intent
 
-        listState.job?.cancel()
-        listState.job = viewModelScope.launch {
-            if (isInitialLoad) {
-                listState.isLoadingInitial.value = true
-                listState.currentOffset = 0
-                listState.items.value = emptyList()
-            } else {
-                listState.isLoadingMore.value = true
-            }
+        reduce {
+            state.copy(
+                isLoadingInitial = isInitialLoad,
+                isLoadingMore = !isInitialLoad
+            )
+        }
 
-            val result: Result<Any> = when (categoryType) {
-                MusicCategoryType.TRENDING -> holodexRepository.getHotSongsForCarousel(organization.takeIf { it != "All Vtubers" })
+        val offset = if (isInitialLoad) 0 else state.currentOffset
 
+        val result: Result<Any> = runCatching {
+            when (categoryType) {
+                MusicCategoryType.TRENDING -> holodexRepository.getHotSongsForCarousel(organization.takeIf { it != "All Vtubers" }).getOrThrow()
                 MusicCategoryType.UPCOMING_MUSIC -> holodexRepository.getUpcomingMusicPaginated(
                     org = organization.takeIf { it != "All Vtubers" },
-                    offset = listState.currentOffset
-                )
-                MusicCategoryType.RECENT_STREAMS -> holodexRepository.getLatestSongsPaginated(offset = listState.currentOffset, limit = PAGE_SIZE)
-
-                // --- START OF IMPLEMENTATION ---
+                    offset = offset
+                ).getOrThrow()
+                MusicCategoryType.RECENT_STREAMS -> holodexRepository.getLatestSongsPaginated(offset = offset, limit = PAGE_SIZE).getOrThrow()
                 MusicCategoryType.COMMUNITY_PLAYLISTS -> holodexRepository.getOrgPlaylistsPaginated(
-                    org = organization,
-                    type = "ugp", // User Generated Playlist
-                    offset = listState.currentOffset,
-                    limit = PAGE_SIZE
-                )
+                    org = organization, type = "ugp", offset = offset, limit = PAGE_SIZE
+                ).getOrThrow()
                 MusicCategoryType.ARTIST_RADIOS -> holodexRepository.getOrgPlaylistsPaginated(
-                    org = organization,
-                    type = "radio",
-                    offset = listState.currentOffset,
-                    limit = PAGE_SIZE
-                )
+                    org = organization, type = "radio", offset = offset, limit = PAGE_SIZE
+                ).getOrThrow()
                 MusicCategoryType.SYSTEM_PLAYLISTS -> holodexRepository.getOrgPlaylistsPaginated(
-                    org = organization,
-                    type = "sgp", // System Generated Playlist
-                    offset = listState.currentOffset,
-                    limit = PAGE_SIZE
-                )
-                // --- END OF IMPLEMENTATION ---
-
+                    org = organization, type = "sgp", offset = offset, limit = PAGE_SIZE
+                ).getOrThrow()
                 MusicCategoryType.DISCOVER_CHANNELS -> holodexRepository.getOrgChannelsPaginated(
-                    org = organization,
-                    offset = listState.currentOffset,
-                    limit = PAGE_SIZE
-                )
+                    org = organization, offset = offset, limit = PAGE_SIZE
+                ).getOrThrow()
+                else -> throw NotImplementedError("Category $categoryType not implemented")
+            }
+        }
 
-                else -> Result.failure(NotImplementedError("Category $categoryType not implemented for FullListView."))
+        result.onSuccess { response ->
+            val likedIds = holodexRepository.likedItemIds.first()
+            val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+
+            val newItems: List<Any> = when (response) {
+                is List<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    (response as List<com.example.holodex.data.model.discovery.MusicdexSong>).map { song ->
+                        val videoShell = song.toVideoShell()
+                        song.toUnifiedDisplayItem(
+                            parentVideo = videoShell,
+                            isLiked = likedIds.contains("${song.videoId}_${song.start}"),
+                            isDownloaded = downloadedIds.contains("${song.videoId}_${song.start}")
+                        )
+                    }
+                }
+                is com.example.holodex.data.cache.FetcherResult<*> -> {
+                    (response.data as List<com.example.holodex.data.model.HolodexVideoItem>).map { video ->
+                        video.toUnifiedDisplayItem(
+                            isLiked = likedIds.contains(video.id),
+                            downloadedSegmentIds = downloadedIds
+                        )
+                    }
+                }
+                is com.example.holodex.data.api.PaginatedSongsResponse -> {
+                    response.items.map { song ->
+                        val videoShell = song.toVideoShell()
+                        song.toUnifiedDisplayItem(
+                            parentVideo = videoShell,
+                            isLiked = likedIds.contains("${song.videoId}_${song.start}"),
+                            isDownloaded = downloadedIds.contains("${song.videoId}_${song.start}")
+                        )
+                    }
+                }
+                is com.example.holodex.data.api.PlaylistListResponse -> response.items
+                is com.example.holodex.data.api.PaginatedChannelsResponse -> response.items.map { it.toDiscoveryChannel() }
+                else -> emptyList()
             }
 
+            val newItemsCount = newItems.size
+            var finalItemsList = if (isInitialLoad) emptyList() else state.items
 
-            result.onSuccess { response ->
-                val likedIds = holodexRepository.likedItemIds.first()
-                val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+            if (categoryType == MusicCategoryType.DISCOVER_CHANNELS) {
+                val currentChannels = finalItemsList.filterIsInstance<DiscoveryChannel>()
+                val incomingChannels = newItems.filterIsInstance<DiscoveryChannel>()
+                val allChannels = (currentChannels + incomingChannels).distinctBy { it.id }
 
-                val newItems: List<Any> = when (response) {
-                    is List<*> -> {
-                        @Suppress("UNCHECKED_CAST")
-                        (response as List<com.example.holodex.data.model.discovery.MusicdexSong>).map { song ->
-                            val videoShell = song.toVideoShell()
-                            song.toUnifiedDisplayItem(
-                                parentVideo = videoShell,
-                                isLiked = likedIds.contains("${song.videoId}_${song.start}"),
-                                isDownloaded = downloadedIds.contains("${song.videoId}_${song.start}")
-                            )
-                        }
-                    }
+                val grouped = allChannels.groupBy { it.suborg?.takeIf { s -> s.isNotBlank() } ?: organization }
 
-                    is com.example.holodex.data.api.PaginatedSongsResponse -> {
-                        response.items.map { song ->
-                            val videoShell = song.toVideoShell()
-                            song.toUnifiedDisplayItem(
-                                parentVideo = videoShell,
-                                isLiked = likedIds.contains("${song.videoId}_${song.start}"),
-                                isDownloaded = downloadedIds.contains("${song.videoId}_${song.start}")
-                            )
-                        }
-                    }
-
-                    is com.example.holodex.data.api.PlaylistListResponse -> {
-                        response.items
-                    }
-
-                    is com.example.holodex.data.api.PaginatedChannelsResponse -> {
-                        response.items.map { it.toDiscoveryChannel() }
-                    }
-
-                    else -> emptyList()
+                val groupedList = mutableListOf<Any>()
+                grouped.keys.sorted().forEach { header ->
+                    groupedList.add(SubOrgHeader(header))
+                    groupedList.addAll(grouped[header]?.sortedBy { it.name } ?: emptyList())
                 }
+                finalItemsList = groupedList
+            } else {
+                finalItemsList = finalItemsList + newItems
+            }
 
-                if (categoryType == MusicCategoryType.DISCOVER_CHANNELS) {
-                    val currentChannels = if (isInitialLoad) {
-                        emptyList()
-                    } else {
-                        listState.items.value.filterIsInstance<DiscoveryChannel>()
-                    }
+            val isEndOfList = newItemsCount < PAGE_SIZE || categoryType == MusicCategoryType.TRENDING
 
-                    val newChannels = newItems.filterIsInstance<DiscoveryChannel>()
+            reduce {
+                state.copy(
+                    items = finalItemsList,
+                    currentOffset = offset + newItemsCount,
+                    endOfList = isEndOfList,
+                    isLoadingInitial = false,
+                    isLoadingMore = false
+                )
+            }
 
-                    val allChannels = (currentChannels + newChannels).distinctBy { it.id }
-
-                    val groupedChannels = allChannels.groupBy { channel ->
-                        channel.suborg?.takeIf { it.isNotBlank() } ?: organization
-                    }
-
-                    val flattenedList = mutableListOf<Any>()
-                    groupedChannels.keys.sorted().forEach { subOrgName ->
-                        flattenedList.add(SubOrgHeader(name = subOrgName))
-                        val channelsInGroup = groupedChannels[subOrgName]
-                        if (channelsInGroup != null) {
-                            flattenedList.addAll(channelsInGroup.sortedBy { it.name })
-                        }
-                    }
-                    listState.items.value = flattenedList
-                } else {
-                    listState.items.value += newItems
-                }
-
-                val newItemsCount = when (response) {
-                    is List<*> -> response.size
-                    is com.example.holodex.data.api.PaginatedSongsResponse -> response.items.size
-                    is com.example.holodex.data.api.PlaylistListResponse -> response.items.size
-                    is com.example.holodex.data.api.PaginatedChannelsResponse -> response.items.size
-                    else -> 0
-                }
-                listState.currentOffset += newItemsCount
-
-                val totalAvailable = when (response) {
-                    is com.example.holodex.data.api.PaginatedSongsResponse -> response.getTotalAsInt()
-                    is com.example.holodex.data.api.PlaylistListResponse -> response.total
-                    is com.example.holodex.data.api.PaginatedChannelsResponse -> response.getTotalAsInt()
-                    else -> null
-                }
-
-                if (newItemsCount < PAGE_SIZE || newItemsCount == 0 || (totalAvailable != null && listState.items.value.filter { it !is SubOrgHeader }.size >= totalAvailable)) {
-                    listState.endOfList.value = true
-                }
-                if (categoryType == MusicCategoryType.TRENDING) {
-                    listState.endOfList.value = true
-                }
-
-            }.onFailure { Timber.e(it) }
-
-            if (isInitialLoad) listState.isLoadingInitial.value =
-                false else listState.isLoadingMore.value = false
+        }.onFailure { error ->
+            Timber.e(error, "Error loading full list")
+            postSideEffect(FullListSideEffect.ShowToast("Failed to load data"))
+            reduce {
+                state.copy(isLoadingInitial = false, isLoadingMore = false)
+            }
         }
     }
 }

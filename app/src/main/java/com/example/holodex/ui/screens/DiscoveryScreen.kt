@@ -43,21 +43,22 @@ import com.example.holodex.auth.AuthViewModel
 import com.example.holodex.data.model.discovery.DiscoveryChannel
 import com.example.holodex.data.model.discovery.PlaylistStub
 import com.example.holodex.data.model.discovery.SingingStreamShelfItem
-import com.example.holodex.ui.AppDestinations
 import com.example.holodex.ui.composables.CarouselShelf
 import com.example.holodex.ui.composables.ChannelCard
 import com.example.holodex.ui.composables.HeroCarousel
 import com.example.holodex.ui.composables.PlaylistCard
 import com.example.holodex.ui.composables.UnifiedGridItem
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.util.findActivity
 import com.example.holodex.viewmodel.DiscoveryViewModel
+import com.example.holodex.viewmodel.MusicCategoryType
 import com.example.holodex.viewmodel.ShelfType
 import com.example.holodex.viewmodel.UnifiedDisplayItem
 import com.example.holodex.viewmodel.VideoListViewModel
-import com.example.holodex.viewmodel.VideoListViewModel.MusicCategoryType
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.state.UiState
 import kotlinx.coroutines.flow.collectLatest
+import org.orbitmvi.orbit.compose.collectAsState
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,8 +72,9 @@ fun DiscoveryScreen(
 
     val uiState by discoveryViewModel.uiState.collectAsStateWithLifecycle()
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
-    val selectedOrg by videoListViewModel.selectedOrganization.collectAsStateWithLifecycle()
-    val availableOrganizations by videoListViewModel.availableOrganizations.collectAsStateWithLifecycle()
+    val videoListState by videoListViewModel.collectAsState()
+    val selectedOrg = videoListState.selectedOrganization
+    val availableOrganizations = videoListState.availableOrganizations
     val context = LocalContext.current
 
     var showOrgMenu by remember { mutableStateOf(false) }

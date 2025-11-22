@@ -34,13 +34,13 @@ import com.example.holodex.R
 import com.example.holodex.data.model.discovery.DiscoveryChannel
 import com.example.holodex.data.model.discovery.PlaylistStub
 import com.example.holodex.data.model.discovery.SingingStreamShelfItem
-import com.example.holodex.ui.AppDestinations
 import com.example.holodex.ui.composables.CarouselShelf
 import com.example.holodex.ui.composables.ChannelCard
 import com.example.holodex.ui.composables.ErrorStateWithRetry
 import com.example.holodex.ui.composables.LoadingState
 import com.example.holodex.ui.composables.PlaylistCard
 import com.example.holodex.ui.composables.UnifiedGridItem
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.viewmodel.DiscoveryViewModel
 import com.example.holodex.viewmodel.VideoListViewModel
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem

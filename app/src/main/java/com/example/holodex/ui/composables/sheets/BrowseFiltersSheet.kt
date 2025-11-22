@@ -34,13 +34,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.holodex.R
 import com.example.holodex.viewmodel.VideoListViewModel
 import com.example.holodex.viewmodel.state.BrowseFilterState
 import com.example.holodex.viewmodel.state.SortOrder
 import com.example.holodex.viewmodel.state.VideoSortField
 import com.example.holodex.viewmodel.state.ViewTypePreset
+import org.orbitmvi.orbit.compose.collectAsState
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,7 +53,8 @@ fun BrowseFiltersSheet(
 ) {
     var tempFilters by remember { mutableStateOf(initialFilters) }
 
-    val organizationsForDropdown by videoListViewModel.availableOrganizations.collectAsStateWithLifecycle()
+    val videoListState by videoListViewModel.collectAsState()
+    val organizationsForDropdown = videoListState.availableOrganizations
 
     val viewTypePresetOptions = videoListViewModel.browseScreenCategories
 

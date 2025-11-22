@@ -54,8 +54,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.example.holodex.R
-import com.example.holodex.ui.AppDestinations
 import com.example.holodex.ui.dialogs.AddExternalChannelDialog
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.viewmodel.ExternalChannelViewModel
 import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import kotlinx.coroutines.launch

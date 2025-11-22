@@ -35,12 +35,6 @@ import javax.inject.Inject
 
 // --- State Definitions ---
 
-enum class MusicCategoryType {
-    LATEST, UPCOMING_MUSIC, SEARCH, FAVORITES, LIKED_SEGMENTS,
-    TRENDING, RECENT_STREAMS, COMMUNITY_PLAYLISTS,
-    ARTIST_RADIOS, SYSTEM_PLAYLISTS, DISCOVER_CHANNELS
-}
-
 data class VideoListState(
     // Browse Data
     val browseItems: List<UnifiedDisplayItem> = emptyList(),

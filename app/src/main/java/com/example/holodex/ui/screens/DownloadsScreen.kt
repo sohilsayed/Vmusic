@@ -83,13 +83,12 @@ import coil.request.ImageRequest
 import com.example.holodex.R
 import com.example.holodex.data.db.DownloadStatus
 import com.example.holodex.data.db.DownloadedItemEntity
-import com.example.holodex.data.db.LikedItemType
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.playback.util.formatDurationSecondsToString
-import com.example.holodex.ui.AppDestinations
 import com.example.holodex.ui.composables.ItemMenuActions
 import com.example.holodex.ui.composables.ItemMenuState
 import com.example.holodex.ui.composables.ItemOptionsMenu
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.util.ThumbnailQuality
 import com.example.holodex.util.getYouTubeThumbnailUrl
 import com.example.holodex.viewmodel.DownloadsViewModel

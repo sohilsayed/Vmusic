@@ -54,9 +54,9 @@ import coil.request.ImageRequest
 import com.example.holodex.R
 import com.example.holodex.data.db.ExternalChannelEntity
 import com.example.holodex.data.db.FavoriteChannelEntity
-import com.example.holodex.ui.AppDestinations
 import com.example.holodex.ui.composables.LoadingSkeleton
 import com.example.holodex.ui.composables.UnifiedListItem
+import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.viewmodel.FavoritesSideEffect
 import com.example.holodex.viewmodel.FavoritesViewModel
 import com.example.holodex.viewmodel.PlaylistManagementViewModel
