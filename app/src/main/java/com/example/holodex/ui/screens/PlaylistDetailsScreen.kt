@@ -1,9 +1,8 @@
-@file:kotlin.OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package com.example.holodex.ui.screens
 
 import android.widget.Toast
-import androidx.annotation.OptIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -64,7 +63,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.example.holodex.R
@@ -79,11 +77,14 @@ import com.example.holodex.util.ArtworkResolver
 import com.example.holodex.util.DynamicTheme
 import com.example.holodex.util.findActivity
 import com.example.holodex.viewmodel.FavoritesViewModel
+import com.example.holodex.viewmodel.PlaylistDetailsSideEffect
 import com.example.holodex.viewmodel.PlaylistDetailsViewModel
 import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import com.example.holodex.viewmodel.UnifiedDisplayItem
 import com.example.holodex.viewmodel.VideoListViewModel
 import kotlinx.coroutines.launch
+import org.orbitmvi.orbit.compose.collectAsState
+import org.orbitmvi.orbit.compose.collectSideEffect
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -96,14 +97,17 @@ fun PlaylistDetailsScreen(
 ) {
     val playlistDetailsViewModel: PlaylistDetailsViewModel = hiltViewModel()
 
-    val playlistDetails by playlistDetailsViewModel.playlistDetails.collectAsStateWithLifecycle()
-    val items by playlistDetailsViewModel.unifiedPlaylistItems.collectAsStateWithLifecycle()
-    val isLoading by playlistDetailsViewModel.isLoading.collectAsStateWithLifecycle()
-    val error by playlistDetailsViewModel.error.collectAsStateWithLifecycle()
-    val isEditMode by playlistDetailsViewModel.isEditMode.collectAsStateWithLifecycle()
-    val editablePlaylist by playlistDetailsViewModel.editablePlaylist.collectAsStateWithLifecycle()
-    val isPlaylistOwned by playlistDetailsViewModel.isPlaylistOwned.collectAsStateWithLifecycle()
-    val dynamicTheme by playlistDetailsViewModel.dynamicTheme.collectAsStateWithLifecycle()
+    // --- ORBIT STATE COLLECTION ---
+    val state by playlistDetailsViewModel.collectAsState()
+
+    // Derived variables for cleaner usage
+    val playlistDetails = state.playlist
+    val items = state.items
+    val isEditMode = state.isEditMode
+    val editablePlaylist = state.editablePlaylist
+    val dynamicTheme = state.dynamicTheme
+    val isPlaylistOwned = state.isPlaylistOwned
+    val isShuffleActive = state.isShuffleActive
 
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
@@ -122,18 +126,21 @@ fun PlaylistDetailsScreen(
         }
     }
 
-    LaunchedEffect(error) {
-        error?.let {
-            coroutineScope.launch {
-                snackbarHostState.showSnackbar(message = it, duration = SnackbarDuration.Long)
-                playlistDetailsViewModel.clearError()
+    // --- ORBIT SIDE EFFECTS ---
+    playlistDetailsViewModel.collectSideEffect { effect ->
+        when (effect) {
+            is PlaylistDetailsSideEffect.ShowToast -> {
+                Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        playlistDetailsViewModel.transientMessage.collect { message ->
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    LaunchedEffect(state.error) {
+        state.error?.let {
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar(message = it, duration = SnackbarDuration.Long)
+                playlistDetailsViewModel.clearError()
+            }
         }
     }
 
@@ -172,7 +179,6 @@ fun PlaylistDetailsScreen(
                                 Icon(Icons.Default.Edit, contentDescription = "Edit Playlist")
                             }
                         }
-                        val isShuffleActive by playlistDetailsViewModel.isPlaylistShuffleActive.collectAsStateWithLifecycle()
                         IconButton(onClick = { playlistDetailsViewModel.togglePlaylistShuffleMode() }) {
                             Icon(
                                 painter = painterResource(id = if (isShuffleActive) R.drawable.ic_shuffle_on_24 else R.drawable.ic_shuffle_off_24),
@@ -199,16 +205,16 @@ fun PlaylistDetailsScreen(
             CompositionLocalProvider(LocalContentColor provides dynamicTheme.onPrimary) {
                 Box(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
                     when {
-                        isLoading && items.isEmpty() -> {
+                        state.isLoading && items.isEmpty() -> {
                             LoadingState(message = stringResource(R.string.loading_content_message))
                         }
-                        error != null && items.isEmpty() -> {
+                        state.error != null && items.isEmpty() -> {
                             ErrorStateWithRetry(
-                                message = error!!,
+                                message = state.error!!,
                                 onRetry = { playlistDetailsViewModel.loadPlaylistDetails() }
                             )
                         }
-                        items.isEmpty() && !isLoading -> {
+                        items.isEmpty() && !state.isLoading -> {
                             EmptyState(
                                 message = stringResource(R.string.message_playlist_is_empty),
                                 onRefresh = { playlistDetailsViewModel.loadPlaylistDetails() }

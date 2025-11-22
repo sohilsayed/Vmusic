@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,7 +18,6 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,7 +44,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -59,6 +56,8 @@ import com.example.holodex.data.model.discovery.DiscoveryChannel
 import com.example.holodex.data.model.discovery.SingingStreamShelfItem
 import com.example.holodex.ui.composables.CarouselShelf
 import com.example.holodex.ui.composables.ChannelCard
+import com.example.holodex.ui.composables.ErrorStateWithRetry
+import com.example.holodex.ui.composables.LoadingState
 import com.example.holodex.ui.composables.SimpleProcessedBackground
 import com.example.holodex.ui.composables.UnifiedGridItem
 import com.example.holodex.ui.navigation.AppDestinations
@@ -87,128 +86,156 @@ fun ChannelScreen(
     val discoveryViewModel: DiscoveryViewModel = hiltViewModel()
     val videoListViewModel: VideoListViewModel = hiltViewModel(findActivity())
 
-    val detailsState by channelViewModel.channelDetailsState.collectAsStateWithLifecycle()
-    val discoveryState by channelViewModel.discoveryState.collectAsStateWithLifecycle()
-    val popularSongsState by channelViewModel.popularSongsState.collectAsStateWithLifecycle()
+    val state by channelViewModel.collectAsState()
     val favoritesState by favoritesViewModel.collectAsState()
-    val dynamicTheme by channelViewModel.dynamicTheme.collectAsStateWithLifecycle()
 
-    val backgroundImageUrl by remember(discoveryState, detailsState) {
+    val backgroundImageUrl by remember(state) {
         derivedStateOf {
-            val detailsData = (detailsState as? UiState.Success)?.data
-            detailsData?.bannerUrl?.takeIf { it.isNotBlank() }
-                ?: (discoveryState as? UiState.Success)?.data?.recentSingingStreams?.firstOrNull()?.video?.id?.let {
+            state.channelDetails?.bannerUrl?.takeIf { it.isNotBlank() }
+                ?: state.discoveryContent?.recentSingingStreams?.firstOrNull()?.video?.id?.let {
                     getYouTubeThumbnailUrl(it, ThumbnailQuality.MAX).firstOrNull()
                 }
         }
     }
 
-
     Box(modifier = Modifier.fillMaxSize()) {
         SimpleProcessedBackground(
             artworkUri = backgroundImageUrl,
-            dynamicColor = dynamicTheme.primary
+            dynamicColor = state.dynamicTheme.primary
         )
 
         Scaffold(
-            topBar = { TopAppBar(title = {}, navigationIcon = { IconButton(onClick = onNavigateUp) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)) },
+            topBar = {
+                TopAppBar(
+                    title = {},
+                    navigationIcon = {
+                        IconButton(onClick = onNavigateUp) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                "Back"
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                )
+            },
             containerColor = Color.Transparent
         ) { paddingValues ->
-            LazyColumn(
-                modifier = Modifier.padding(paddingValues).fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                item {
-                    when(val state = detailsState) {
-                        is UiState.Success -> ChannelHeader(
-                            details = state.data,
-                            isFavorited = favoritesState.favoriteChannels.any {
-                                (it is FavoriteChannelEntity && it.id == state.data.id) ||
-                                        (it is ExternalChannelEntity && it.channelId == state.data.id)
-                            },
-                            onFavoriteClicked = { favoritesViewModel.toggleFavoriteChannelByDetails(state.data) }
-                        )
-                        is UiState.Loading -> Box(modifier = Modifier.height(200.dp).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                        is UiState.Error -> Text(text = state.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
-                    }
-                }
-
-                item {
-                    CarouselShelf<UnifiedDisplayItem>(
-                        title = "Popular",
-                        uiState = popularSongsState,
-                        actionContent = {
-                            TextButton(onClick = { navController.navigate(AppDestinations.fullListViewRoute(MusicCategoryType.TRENDING, channelViewModel.channelId)) }) {
-                                Text(stringResource(id = R.string.action_show_more))
-                            }
-                        },
-                        itemContent = { item ->
-                            UnifiedGridItem(item = item, onClick = { discoveryViewModel.playUnifiedItem(item) })
-                        }
-                    )
-                }
-                item {
-                    val recentStreamsUiState: UiState<List<SingingStreamShelfItem>> =
-                        remember(discoveryState) {
-                            when (val state = discoveryState) {
-                                is UiState.Success -> UiState.Success(
-                                    state.data.recentSingingStreams ?: emptyList()
+            Box(modifier = Modifier
+                .padding(paddingValues)
+                .fillMaxSize()) {
+                if (state.isLoading) {
+                    LoadingState(message = "Loading channel...")
+                } else if (state.error != null) {
+                    ErrorStateWithRetry(
+                        message = state.error!!,
+                        onRetry = { /* TODO: Add retry intent to VM */ })
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 80.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        // 1. Header
+                        item {
+                            state.channelDetails?.let { details ->
+                                ChannelHeader(
+                                    details = details,
+                                    isFavorited = favoritesState.favoriteChannels.any {
+                                        (it is FavoriteChannelEntity && it.id == details.id) ||
+                                                (it is ExternalChannelEntity && it.channelId == details.id)
+                                    },
+                                    onFavoriteClicked = {
+                                        favoritesViewModel.toggleFavoriteChannelByDetails(
+                                            details
+                                        )
+                                    }
                                 )
-
-                                is UiState.Error -> UiState.Error(state.message)
-                                is UiState.Loading -> UiState.Loading
                             }
                         }
 
-
-                    CarouselShelf<SingingStreamShelfItem>(
-                        title = "Latest Streams",
-                        uiState = recentStreamsUiState,
-                        actionContent = {
-                            TextButton(onClick = {
-                                videoListViewModel.setBrowseContextAndNavigate(channelId = channelViewModel.channelId)
-                                navController.navigate(AppDestinations.HOME_ROUTE)
-                            }) {
-                                Text(stringResource(id = R.string.action_show_more))
+                        // 2. Popular Songs
+                        if (state.popularSongs.isNotEmpty()) {
+                            item {
+                                CarouselShelf<UnifiedDisplayItem>(
+                                    title = "Popular",
+                                    uiState = UiState.Success(state.popularSongs),
+                                    actionContent = {
+                                        TextButton(onClick = {
+                                            navController.navigate(
+                                                AppDestinations.fullListViewRoute(
+                                                    MusicCategoryType.TRENDING,
+                                                    channelViewModel.channelId
+                                                )
+                                            )
+                                        }) {
+                                            Text(stringResource(id = R.string.action_show_more))
+                                        }
+                                    },
+                                    itemContent = { item ->
+                                        UnifiedGridItem(
+                                            item = item,
+                                            onClick = { discoveryViewModel.playUnifiedItem(item) })
+                                    }
+                                )
                             }
-                        },
-                        itemContent = { item ->
-                            val shell = item.video.toUnifiedDisplayItem(false, emptySet())
-                            UnifiedGridItem(
-                                item = shell,
-                                onClick = {
-                                    navController.navigate(
-                                        AppDestinations.videoDetailRoute(item.video.id)
-                                    )
-                                })
                         }
-                    )
-                }
 
-                item {
-                    val otherChannelsUiState: UiState<List<DiscoveryChannel>> = remember(discoveryState) {
-                        when (val state = discoveryState) {
-                            is UiState.Success -> UiState.Success(state.data.channels ?: emptyList())
-                            is UiState.Error -> UiState.Error(state.message)
-                            is UiState.Loading -> UiState.Loading
+                        // 3. Latest Streams
+                        val recentStreams =
+                            state.discoveryContent?.recentSingingStreams ?: emptyList()
+                        if (recentStreams.isNotEmpty()) {
+                            item {
+                                CarouselShelf<SingingStreamShelfItem>(
+                                    title = "Latest Streams",
+                                    uiState = UiState.Success(recentStreams),
+                                    actionContent = {
+                                        TextButton(onClick = {
+                                            videoListViewModel.setBrowseContextAndNavigate(channelId = channelViewModel.channelId)
+                                            navController.navigate(AppDestinations.HOME_ROUTE)
+                                        }) {
+                                            Text(stringResource(id = R.string.action_show_more))
+                                        }
+                                    },
+                                    itemContent = { item ->
+                                        val shell =
+                                            item.video.toUnifiedDisplayItem(false, emptySet())
+                                        UnifiedGridItem(
+                                            item = shell,
+                                            onClick = {
+                                                navController.navigate(
+                                                    AppDestinations.videoDetailRoute(
+                                                        item.video.id
+                                                    )
+                                                )
+                                            })
+                                    }
+                                )
+                            }
+                        }
+
+                        // 4. Other Channels (Sub-org)
+                        val otherChannels = state.discoveryContent?.channels ?: emptyList()
+                        if (otherChannels.isNotEmpty()) {
+                            item {
+                                val orgName = state.channelDetails?.org ?: "Organization"
+                                CarouselShelf<DiscoveryChannel>(
+                                    title = "Discover More from $orgName",
+                                    uiState = UiState.Success(otherChannels),
+                                    actionContent = {
+                                        TextButton(onClick = { /* TODO */ }) {
+                                            Text(stringResource(id = R.string.action_show_more))
+                                        }
+                                    },
+                                    itemContent = { channel ->
+                                        ChannelCard(
+                                            channel = channel,
+                                            onChannelClicked = { navController.navigate("channel_details/${channel.id}") })
+                                    }
+                                )
+                            }
                         }
                     }
-                    val orgName = (detailsState as? UiState.Success)?.data?.org ?: "Organization"
-
-
-                    CarouselShelf<DiscoveryChannel>(
-                        title = "Discover More from $orgName",
-                        uiState = otherChannelsUiState,
-                        actionContent = {
-                            TextButton(onClick = { /* TODO: Navigate to a full channels list for that org */ }) {
-                                Text(stringResource(id = R.string.action_show_more))
-                            }
-                        },
-                        itemContent = { channel ->
-                            ChannelCard(channel = channel, onChannelClicked = { navController.navigate("channel_details/${channel.id}") })
-                        }
-                    )
                 }
             }
         }
@@ -224,23 +251,42 @@ private fun ChannelHeader(
     val uriHandler = LocalUriHandler.current
 
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(details.photoUrl).crossfade(true).build(),
+            model = ImageRequest.Builder(LocalContext.current).data(details.photoUrl)
+                .crossfade(true).build(),
             contentDescription = "Channel Avatar",
-            modifier = Modifier.size(96.dp).clip(CircleShape),
+            modifier = Modifier
+                .size(96.dp)
+                .clip(CircleShape),
             contentScale = ContentScale.Crop
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(details.englishName ?: details.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            details.org?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Text(
+                details.englishName ?: details.name,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+            details.org?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onFavoriteClicked) {
-                Icon(if (isFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, Modifier.size(ButtonDefaults.IconSize))
+                Icon(
+                    if (isFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    null,
+                    Modifier.size(ButtonDefaults.IconSize)
+                )
                 Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                 Text(if (isFavorited) "Favorited" else "Favorite")
             }

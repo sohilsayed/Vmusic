@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/viewmodel/PlaylistDetailsViewModel.kt
 package com.example.holodex.viewmodel
 
 import android.app.Application
@@ -11,6 +10,7 @@ import com.example.holodex.R
 import com.example.holodex.auth.TokenManager
 import com.example.holodex.data.db.DownloadedItemEntity
 import com.example.holodex.data.db.LikedItemEntity
+import com.example.holodex.data.db.LikedItemType
 import com.example.holodex.data.db.PlaylistEntity
 import com.example.holodex.data.db.PlaylistItemEntity
 import com.example.holodex.data.db.SyncStatus
@@ -29,27 +29,40 @@ import com.example.holodex.viewmodel.mappers.toPlaybackItem
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toVideoShell
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.orbitmvi.orbit.Container
+import org.orbitmvi.orbit.ContainerHost
+import org.orbitmvi.orbit.viewmodel.container
 import timber.log.Timber
 import java.time.Instant
 import javax.inject.Inject
 
+// --- State ---
+data class PlaylistDetailsState(
+    val playlist: PlaylistEntity? = null,
+    val items: List<UnifiedDisplayItem> = emptyList(),
+    val rawItems: List<Any> = emptyList(), // Keep raw for editing logic
+    val isLoading: Boolean = true,
+    val error: String? = null,
+    val isEditMode: Boolean = false,
+    val editablePlaylist: PlaylistEntity? = null,
+    val editableItems: List<PlaylistItemEntity> = emptyList(),
+    val isPlaylistOwned: Boolean = false,
+    val isShuffleActive: Boolean = false,
+    val dynamicTheme: DynamicTheme = DynamicTheme.default(Color.Black, Color.White)
+)
+
+sealed class PlaylistDetailsSideEffect {
+    data class ShowToast(val message: String) : PlaylistDetailsSideEffect()
+}
+
 @UnstableApi
 @HiltViewModel
-class PlaylistDetailsViewModel
-@Inject constructor(
+class PlaylistDetailsViewModel @Inject constructor(
     private val application: Application,
     savedStateHandle: SavedStateHandle,
     private val holodexRepository: HolodexRepository,
@@ -59,7 +72,7 @@ class PlaylistDetailsViewModel
     private val addItemsToQueueUseCase: AddItemsToQueueUseCase,
     private val paletteExtractor: PaletteExtractor,
     private val tokenManager: TokenManager
-) : ViewModel() {
+) : ContainerHost<PlaylistDetailsState, PlaylistDetailsSideEffect>, ViewModel() {
 
     companion object {
         const val PLAYLIST_ID_ARG = "playlistId"
@@ -69,272 +82,231 @@ class PlaylistDetailsViewModel
 
     val playlistId: String = savedStateHandle.get<String>(PLAYLIST_ID_ARG) ?: ""
 
-    private val _playlistDetails = MutableStateFlow<PlaylistEntity?>(null)
-    val playlistDetails: StateFlow<PlaylistEntity?> = _playlistDetails.asStateFlow()
-
-    private val _isLoading = MutableStateFlow(true)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error.asStateFlow()
-
-    private val _isPlaylistShuffleActive = MutableStateFlow(false)
-    val isPlaylistShuffleActive: StateFlow<Boolean> = _isPlaylistShuffleActive.asStateFlow()
-
-    private val _rawItemsFlow = MutableStateFlow<List<Any>>(emptyList())
-
-    private val _transientMessage = MutableSharedFlow<String>()
-    val transientMessage: SharedFlow<String> = _transientMessage.asSharedFlow()
-
-    private val _dynamicTheme = MutableStateFlow(DynamicTheme.default(Color.Black, Color.White))
-    val dynamicTheme: StateFlow<DynamicTheme> = _dynamicTheme.asStateFlow()
-
-    private val _isEditMode = MutableStateFlow(false)
-    val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
-
-    private val _editablePlaylist = MutableStateFlow<PlaylistEntity?>(null)
-    val editablePlaylist: StateFlow<PlaylistEntity?> = _editablePlaylist.asStateFlow()
-
-    private val _editableItems = MutableStateFlow<List<PlaylistItemEntity>>(emptyList())
-
-    val isPlaylistOwned: StateFlow<Boolean> = _playlistDetails.map { playlist ->
-        playlist?.owner != null && playlist.owner.toString() == tokenManager.getUserId()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), false)
-
-    val unifiedPlaylistItems: StateFlow<List<UnifiedDisplayItem>> = combine(
-        _isEditMode, _rawItemsFlow, _editableItems,
-        holodexRepository.likedItemIds,
-        downloadRepository.getAllDownloads().map { list -> list.map { it.videoId }.toSet() }
-    ) { isEditing, rawItems, editableItems, likedIds, downloadedIds ->
-        val itemsToDisplay = if (isEditing) editableItems else rawItems
-        itemsToDisplay.mapNotNull { rawItem ->
-            when (rawItem) {
-                is PlaylistItemEntity -> rawItem.toUnifiedDisplayItem(
-                    isDownloaded = downloadedIds.contains(rawItem.itemIdInPlaylist),
-                    isLiked = likedIds.contains(rawItem.itemIdInPlaylist)
-                )
-                is LikedItemEntity -> rawItem.toUnifiedDisplayItem(
-                    isDownloaded = downloadedIds.contains(rawItem.itemId)
-                )
-                is DownloadedItemEntity -> rawItem.toUnifiedDisplayItem(
-                    isLiked = likedIds.contains(rawItem.videoId)
-                )
-                is MusicdexSong -> {
-                    val videoShell = rawItem.toVideoShell(_playlistDetails.value?.name ?: "")
-                    rawItem.toUnifiedDisplayItem(
-                        parentVideo = videoShell,
-                        isLiked = likedIds.contains("${rawItem.videoId}_${rawItem.start}"),
-                        isDownloaded = downloadedIds.contains("${rawItem.videoId}_${rawItem.start}")
-                    )
-                }
-                else -> null
-            }
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
-
-    fun togglePlaylistShuffleMode() {
-        _isPlaylistShuffleActive.value = !_isPlaylistShuffleActive.value
-    }
-
-    init {
+    override val container: Container<PlaylistDetailsState, PlaylistDetailsSideEffect> = container(PlaylistDetailsState()) {
         if (playlistId.isNotBlank()) {
             loadPlaylistDetails()
         } else {
-            _isLoading.value = false
-            _error.value = "Invalid Playlist ID."
+            // FIX: Wrapped reduce in intent block
+            intent {
+                reduce { state.copy(isLoading = false, error = "Invalid Playlist ID") }
+            }
         }
     }
 
-    fun loadPlaylistDetails() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            _error.value = null
-            val now = Instant.now().toString()
+    fun loadPlaylistDetails() = intent {
+        reduce { state.copy(isLoading = true, error = null) }
+        val now = Instant.now().toString()
+
+        try {
+            var playlistEntity: PlaylistEntity? = null
+            var rawItemsList: List<Any> = emptyList()
             var artworkUrl: String? = null
 
-            try {
-                when (playlistId) {
-                    LIKED_SEGMENTS_PLAYLIST_ID -> {
-                        val likedItems = holodexRepository.getObservableLikedSongSegments().first()
-                        _playlistDetails.value = PlaylistEntity(
-                            playlistId = LIKED_SEGMENTS_PLAYLIST_ID.toLong(),
-                            name = application.getString(R.string.playlist_title_liked_segments),
-                            description = application.getString(R.string.playlist_desc_liked_segments),
-                            createdAt = now, last_modified_at = now, serverId = null, owner = null
+            when (playlistId) {
+                LIKED_SEGMENTS_PLAYLIST_ID -> {
+                    rawItemsList = holodexRepository.getObservableLikedSongSegments().first()
+                    playlistEntity = PlaylistEntity(
+                        playlistId = LIKED_SEGMENTS_PLAYLIST_ID.toLong(),
+                        name = application.getString(R.string.playlist_title_liked_segments),
+                        description = application.getString(R.string.playlist_desc_liked_segments),
+                        createdAt = now, last_modified_at = now, serverId = null, owner = null
+                    )
+                    artworkUrl = (rawItemsList.firstOrNull() as? LikedItemEntity)?.artworkUrlSnapshot
+                }
+                DOWNLOADS_PLAYLIST_ID -> {
+                    rawItemsList = downloadRepository.getAllDownloads().first()
+                    playlistEntity = PlaylistEntity(
+                        playlistId = DOWNLOADS_PLAYLIST_ID.toLong(),
+                        name = application.getString(R.string.playlist_title_downloads),
+                        description = application.getString(R.string.playlist_desc_downloads),
+                        createdAt = now, last_modified_at = now, serverId = null, owner = null
+                    )
+                    artworkUrl = (rawItemsList.firstOrNull() as? DownloadedItemEntity)?.artworkUrl
+                }
+                else -> {
+                    val longId = playlistId.toLongOrNull()
+                    if (longId != null && longId > 0) {
+                        // Local DB Playlist
+                        playlistEntity = holodexRepository.getPlaylistById(longId)
+                        rawItemsList = holodexRepository.getItemsForPlaylist(longId).first()
+                        artworkUrl = (rawItemsList.firstOrNull() as? PlaylistItemEntity)?.songArtworkUrlPlaylist
+                    } else {
+                        // Remote/System Playlist
+                        val isRadio = playlistId.startsWith(":artist") || playlistId.startsWith(":hot") || playlistId.startsWith(":radio")
+                        val result = if (isRadio) holodexRepository.getRadioContent(playlistId) else holodexRepository.getFullPlaylistContent(playlistId)
+
+                        val fullPlaylist = result.getOrThrow()
+                        val tempStub = PlaylistStub(
+                            id = fullPlaylist.id, title = fullPlaylist.title, type = fullPlaylist.type ?: "",
+                            description = fullPlaylist.description, artContext = null
                         )
-                        _rawItemsFlow.value = likedItems
-                        artworkUrl = likedItems.firstOrNull()?.artworkUrlSnapshot
-                    }
+                        val formattedTitle = PlaylistFormatter.getDisplayTitle(tempStub, application) { en, jp -> jp?.takeIf { it.isNotBlank() } ?: en }
+                        val formattedDescription = PlaylistFormatter.getDisplayDescription(tempStub, application) { en, jp -> jp?.takeIf { it.isNotBlank() } ?: en }
 
-                    DOWNLOADS_PLAYLIST_ID -> {
-                        val downloadedItems = downloadRepository.getAllDownloads().first()
-                        _playlistDetails.value = PlaylistEntity(
-                            playlistId = DOWNLOADS_PLAYLIST_ID.toLong(),
-                            name = application.getString(R.string.playlist_title_downloads),
-                            description = application.getString(R.string.playlist_desc_downloads),
-                            createdAt = now, last_modified_at = now, serverId = null, owner = null
+                        playlistEntity = PlaylistEntity(
+                            playlistId = 0L, name = formattedTitle, description = formattedDescription,
+                            createdAt = fullPlaylist.createdAt, last_modified_at = fullPlaylist.updatedAt,
+                            serverId = fullPlaylist.id, owner = null
                         )
-                        _rawItemsFlow.value = downloadedItems
-                        artworkUrl = downloadedItems.firstOrNull()?.artworkUrl
-                    }
-
-                    else -> {
-                        val longId = playlistId.toLongOrNull()
-                        if (longId != null && longId > 0) {
-                            val playlist = holodexRepository.getPlaylistById(longId)
-                            val items = holodexRepository.getItemsForPlaylist(longId).first()
-                            _playlistDetails.value = playlist
-                            _rawItemsFlow.value = items
-                            artworkUrl = items.firstOrNull()?.songArtworkUrlPlaylist
-                        } else {
-                            val isRadio = playlistId.startsWith(":artist") || playlistId.startsWith(":hot") || playlistId.startsWith(":radio")
-                            val result = if (isRadio) holodexRepository.getRadioContent(playlistId) else holodexRepository.getFullPlaylistContent(playlistId)
-
-                            result.onSuccess { fullPlaylist ->
-                                val tempStub = PlaylistStub(
-                                    id = fullPlaylist.id, title = fullPlaylist.title, type = fullPlaylist.type ?: "",
-                                    description = fullPlaylist.description, artContext = null
-                                )
-                                val formattedTitle = PlaylistFormatter.getDisplayTitle(tempStub, application) { en, jp -> jp?.takeIf { it.isNotBlank() } ?: en }
-                                val formattedDescription = PlaylistFormatter.getDisplayDescription(tempStub, application) { en, jp -> jp?.takeIf { it.isNotBlank() } ?: en }
-
-                                _playlistDetails.value = PlaylistEntity(
-                                    playlistId = 0L, name = formattedTitle, description = formattedDescription,
-                                    createdAt = fullPlaylist.createdAt, last_modified_at = fullPlaylist.updatedAt,
-                                    serverId = fullPlaylist.id, owner = null
-                                )
-                                _rawItemsFlow.value = fullPlaylist.content ?: emptyList()
-                                artworkUrl = ArtworkResolver.getPlaylistArtworkUrl(tempStub) ?: fullPlaylist.content?.firstOrNull()?.artUrl
-                            }.onFailure { throw it }
-                        }
+                        rawItemsList = fullPlaylist.content ?: emptyList()
+                        artworkUrl = ArtworkResolver.getPlaylistArtworkUrl(tempStub) ?: fullPlaylist.content?.firstOrNull()?.artUrl
                     }
                 }
-                _dynamicTheme.value = paletteExtractor.extractThemeFromUrl(
-                    artworkUrl,
-                    DynamicTheme.default(Color.Black, Color.White)
-                )
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to load details for playlist ID: $playlistId")
-                _error.value = "Failed to load playlist: ${e.localizedMessage}"
-            } finally {
-                _isLoading.value = false
             }
-        }
-    }
 
-    fun playAllItemsInPlaylist() {
-        viewModelScope.launch {
-            val isRadio = playlistId.startsWith(":")
-            if (isRadio) {
-                playbackRepository.prepareAndPlayRadio(playlistId)
-            } else {
-                val itemsToPlay = unifiedPlaylistItems.value
-                if (itemsToPlay.isEmpty()) {
-                    _error.value = "Playlist is empty."
-                    return@launch
+            // Calculate Theme
+            val theme = paletteExtractor.extractThemeFromUrl(artworkUrl, DynamicTheme.default(Color.Black, Color.White))
+
+            // Map to Unified Items
+            val likedIds = holodexRepository.likedItemIds.first()
+            val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+
+            val unifiedItems = rawItemsList.mapNotNull { rawItem ->
+                when (rawItem) {
+                    is PlaylistItemEntity -> rawItem.toUnifiedDisplayItem(downloadedIds.contains(rawItem.itemIdInPlaylist), likedIds.contains(rawItem.itemIdInPlaylist))
+                    is LikedItemEntity -> rawItem.toUnifiedDisplayItem(downloadedIds.contains(rawItem.itemId))
+                    is DownloadedItemEntity -> rawItem.toUnifiedDisplayItem(likedIds.contains(rawItem.videoId))
+                    is MusicdexSong -> {
+                        val videoShell = rawItem.toVideoShell(playlistEntity?.name ?: "")
+                        rawItem.toUnifiedDisplayItem(videoShell, likedIds.contains("${rawItem.videoId}_${rawItem.start}"), downloadedIds.contains("${rawItem.videoId}_${rawItem.start}"))
+                    }
+                    else -> null
                 }
-                val isShuffleOn = _isPlaylistShuffleActive.value
-                val playbackItems = itemsToPlay.map { it.toPlaybackItem() }
-                playbackRequestManager.submitPlaybackRequest(
-                    items = playbackItems, startIndex = 0, shouldShuffle = isShuffleOn
+            }
+
+            val isOwned = playlistEntity?.owner != null && playlistEntity.owner.toString() == tokenManager.getUserId()
+
+            reduce {
+                state.copy(
+                    playlist = playlistEntity,
+                    items = unifiedItems,
+                    rawItems = rawItemsList,
+                    isLoading = false,
+                    dynamicTheme = theme,
+                    isPlaylistOwned = isOwned
                 )
             }
+
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to load playlist details")
+            reduce { state.copy(isLoading = false, error = e.localizedMessage ?: "Unknown Error") }
         }
     }
 
-    fun addAllToQueue() {
-        viewModelScope.launch {
-            val items = unifiedPlaylistItems.value
-            if (items.isNotEmpty()) {
-                val playbackItems = items.map { it.toPlaybackItem() }
-                addItemsToQueueUseCase(playbackItems)
-                _transientMessage.emit("Added ${items.size} songs to the queue")
+    fun togglePlaylistShuffleMode() = intent {
+        reduce { state.copy(isShuffleActive = !state.isShuffleActive) }
+    }
+
+    fun playAllItemsInPlaylist() = intent {
+        val isRadio = playlistId.startsWith(":")
+        if (isRadio) {
+            playbackRepository.prepareAndPlayRadio(playlistId)
+        } else {
+            if (state.items.isEmpty()) {
+                postSideEffect(PlaylistDetailsSideEffect.ShowToast("Playlist is empty"))
+                return@intent
             }
+            val playbackItems = state.items.map { it.toPlaybackItem() }
+            playbackRequestManager.submitPlaybackRequest(playbackItems, 0, shouldShuffle = state.isShuffleActive)
         }
     }
 
-    fun playFromItem(tappedItem: UnifiedDisplayItem) {
-        viewModelScope.launch {
-            val allItems = unifiedPlaylistItems.value
-            if (allItems.isEmpty()) return@launch
-            val startIndex = allItems.indexOf(tappedItem).coerceAtLeast(0)
-            val playbackItems = allItems.map { it.toPlaybackItem() }
-            playbackRequestManager.submitPlaybackRequest(
-                playbackItems, startIndex, shouldShuffle = _isPlaylistShuffleActive.value
+    fun playFromItem(tappedItem: UnifiedDisplayItem) = intent {
+        if (state.items.isEmpty()) return@intent
+        val index = state.items.indexOf(tappedItem).coerceAtLeast(0)
+        val playbackItems = state.items.map { it.toPlaybackItem() }
+        playbackRequestManager.submitPlaybackRequest(playbackItems, index, shouldShuffle = state.isShuffleActive)
+    }
+
+    fun addAllToQueue() = intent {
+        val items = state.items.map { it.toPlaybackItem() }
+        if (items.isNotEmpty()) {
+            addItemsToQueueUseCase(items)
+            postSideEffect(PlaylistDetailsSideEffect.ShowToast("Added ${items.size} songs to queue"))
+        }
+    }
+
+    // --- Edit Mode Logic ---
+
+    fun enterEditMode() = intent {
+        val editableList = state.rawItems.filterIsInstance<PlaylistItemEntity>()
+        reduce {
+            state.copy(
+                isEditMode = true,
+                editablePlaylist = state.playlist?.copy(),
+                editableItems = editableList
             )
         }
     }
 
-    fun enterEditMode() {
-        _playlistDetails.value?.let { originalPlaylist ->
-            _editablePlaylist.value = originalPlaylist.copy()
-            _editableItems.value = _rawItemsFlow.value.filterIsInstance<PlaylistItemEntity>()
-            _isEditMode.value = true
+    fun cancelEditMode() = intent {
+        reduce { state.copy(isEditMode = false, editablePlaylist = null, editableItems = emptyList()) }
+    }
+
+    fun updateDraftName(newName: String) = intent {
+        reduce { state.copy(editablePlaylist = state.editablePlaylist?.copy(name = newName)) }
+    }
+
+    fun updateDraftDescription(desc: String) = intent {
+        reduce { state.copy(editablePlaylist = state.editablePlaylist?.copy(description = desc)) }
+    }
+
+    fun reorderItemInEditMode(from: Int, to: Int) = intent {
+        val list = state.editableItems.toMutableList()
+        val item = list.removeAt(from)
+        list.add(to, item)
+
+        // Re-map to unified items for display immediately
+        val likedIds = holodexRepository.likedItemIds.first()
+        val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+
+        val unified = list.map { it.toUnifiedDisplayItem(downloadedIds.contains(it.itemIdInPlaylist), likedIds.contains(it.itemIdInPlaylist)) }
+
+        reduce { state.copy(editableItems = list, items = unified) }
+    }
+
+    fun removeItemInEditMode(item: UnifiedDisplayItem) = intent {
+        val list = state.editableItems.filterNot { it.itemIdInPlaylist == item.playbackItemId }
+        // Re-map
+        val likedIds = holodexRepository.likedItemIds.first()
+        val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+        val unified = list.map { it.toUnifiedDisplayItem(downloadedIds.contains(it.itemIdInPlaylist), likedIds.contains(it.itemIdInPlaylist)) }
+
+        reduce { state.copy(editableItems = list, items = unified) }
+    }
+
+    fun saveChanges() = intent {
+        val original = state.playlist
+        val draft = state.editablePlaylist
+        val draftItems = state.editableItems
+
+        if (draft == null || draft.name.isNullOrBlank()) {
+            postSideEffect(PlaylistDetailsSideEffect.ShowToast("Playlist name cannot be empty"))
+            return@intent
         }
-    }
 
-    fun cancelEditMode() {
-        _isEditMode.value = false
-        _editablePlaylist.value = null
-        _editableItems.value = emptyList()
-    }
+        // Calculate diff
+        val originalSyncedIds = state.rawItems.filterIsInstance<PlaylistItemEntity>().filter { !it.isLocalOnly }.map { it.itemIdInPlaylist }
+        val newSyncedIds = draftItems.filter { !it.isLocalOnly }.map { it.itemIdInPlaylist }
 
-    fun updateDraftName(newName: String) {
-        _editablePlaylist.update { it?.copy(name = newName) }
-    }
+        val contentChanged = originalSyncedIds != newSyncedIds
+        val metaChanged = original?.name != draft.name || original?.description != draft.description
 
-    fun updateDraftDescription(newDescription: String) {
-        _editablePlaylist.update { it?.copy(description = newDescription) }
-    }
-
-    fun reorderItemInEditMode(from: Int, to: Int) {
-        val currentList = _editableItems.value.toMutableList()
-        val movedItem = currentList.removeAt(from)
-        currentList.add(to, movedItem)
-        _editableItems.value = currentList
-    }
-
-    fun removeItemInEditMode(itemToRemove: UnifiedDisplayItem) {
-        _editableItems.update { currentList ->
-            currentList.filterNot { it.itemIdInPlaylist == itemToRemove.playbackItemId }
-        }
-    }
-
-    fun saveChanges() = viewModelScope.launch {
-        val originalPlaylist = _playlistDetails.value ?: return@launch
-        val draftPlaylist = _editablePlaylist.value
-        val draftItems = _editableItems.value
-
-        if (draftPlaylist == null || draftPlaylist.name.isNullOrBlank()) {
-            _error.value = "Playlist name cannot be empty."
-            return@launch
-        }
-
-        val originalSyncedItemIds = _rawItemsFlow.value.filterIsInstance<PlaylistItemEntity>()
-            .filter { !it.isLocalOnly }.map { it.itemIdInPlaylist }
-        val newSyncedItemIds = draftItems.filter { !it.isLocalOnly }.map { it.itemIdInPlaylist }
-
-        val contentChanged = originalSyncedItemIds != newSyncedItemIds
-        val metadataChanged = originalPlaylist.name != draftPlaylist.name || originalPlaylist.description != draftPlaylist.description
-
-        val finalPlaylistState = if (contentChanged || metadataChanged) {
-            draftPlaylist.copy(syncStatus = SyncStatus.DIRTY, last_modified_at = Instant.now().toString())
+        val finalPlaylist = if (contentChanged || metaChanged) {
+            draft.copy(syncStatus = SyncStatus.DIRTY, last_modified_at = Instant.now().toString())
         } else {
-            draftPlaylist
+            draft
         }
 
         try {
-            holodexRepository.savePlaylistEdits(finalPlaylistState, draftItems)
+            holodexRepository.savePlaylistEdits(finalPlaylist, draftItems)
             cancelEditMode()
-            loadPlaylistDetails()
+            loadPlaylistDetails() // Refresh
+            postSideEffect(PlaylistDetailsSideEffect.ShowToast("Changes saved"))
         } catch (e: Exception) {
-            Timber.e(e, "Failed to save playlist edits.")
-            _error.value = "Failed to save changes: ${e.localizedMessage}"
+            postSideEffect(PlaylistDetailsSideEffect.ShowToast("Failed to save: ${e.message}"))
         }
     }
 
-    fun clearError() {
-        _error.value = null
-    }
-
+    fun clearError() = intent { reduce { state.copy(error = null) } }
 }
