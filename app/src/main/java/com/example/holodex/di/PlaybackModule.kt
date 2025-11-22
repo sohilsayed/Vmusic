@@ -11,6 +11,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -33,6 +34,7 @@ import com.example.holodex.playback.data.queue.ShuffleOrderProvider
 import com.example.holodex.playback.data.repository.HolodexStreamResolverRepositoryImpl
 import com.example.holodex.playback.data.repository.Media3PlaybackRepositoryImpl
 import com.example.holodex.playback.data.repository.RoomPlaybackStateRepositoryImpl
+import com.example.holodex.playback.data.source.HolodexResolvingDataSource
 import com.example.holodex.playback.data.source.StreamResolutionCoordinator
 import com.example.holodex.playback.data.tracker.PlaybackProgressTracker
 import com.example.holodex.playback.domain.repository.PlaybackRepository
@@ -133,12 +135,16 @@ object PlaybackModule {
     fun provideDataSourceFactory(
         @ApplicationContext context: Context,
         @DownloadCache downloadCache: SimpleCache,
-        @MediaCache mediaCache: SimpleCache
+        @MediaCache mediaCache: SimpleCache,
+        holodexResolver: HolodexResolvingDataSource // <--- INJECT THIS
     ): DataSource.Factory {
-        // --- START OF REPLACEMENT ---
 
         // 1. The base factory for network requests.
-        val upstreamFactory = DefaultHttpDataSource.Factory().setUserAgent("HolodexApp/1.0")
+        val upstreamFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("HolodexApp/1.0")
+            .setConnectTimeoutMs(30000)
+            .setReadTimeoutMs(30000)
+            .setAllowCrossProtocolRedirects(true)
 
         // 2. The default factory that handles most schemes (http, https, content, file, etc.).
         val defaultDataSourceFactory = DefaultDataSource.Factory(context, upstreamFactory)
@@ -146,7 +152,7 @@ object PlaybackModule {
         // 3. The factory that handles streaming from the media cache.
         val mediaCacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(mediaCache)
-            .setUpstreamDataSourceFactory(defaultDataSourceFactory) // Use the default factory as upstream
+            .setUpstreamDataSourceFactory(defaultDataSourceFactory)
 
         // 4. Our final, all-encompassing factory.
         return object : DataSource.Factory {
@@ -154,37 +160,36 @@ object PlaybackModule {
                 // The source for handling downloads via the "cache://" scheme.
                 val downloadCacheDataSource = CacheDataSource(downloadCache, null) // Cache-only
 
-                // The source for everything else (network streaming, local files).
+                // The source for everything else.
                 val defaultSource = mediaCacheDataSourceFactory.createDataSource()
 
-                return object : DataSource by defaultSource {
+                // *** FIX IS HERE ***
+                // Wrap the default source in the ResolvingDataSource.
+                // This intercepts 'holodex://' -> resolves to 'https://' -> passes 'https://' to defaultSource
+                val resolvingDataSource = ResolvingDataSource(defaultSource, holodexResolver)
+
+                return object : DataSource by resolvingDataSource {
                     override fun open(dataSpec: DataSpec): Long {
-                        // --- FIX: Add a specific case for the 'placeholder' scheme ---
                         return when (dataSpec.uri.scheme) {
                             "cache" -> {
-                                // If it's our special download scheme, use the download cache source.
                                 Timber.d("DataSource: Routing 'cache://' to download cache. Key: ${dataSpec.uri.authority}")
                                 val newSpec = dataSpec.buildUpon().setKey(dataSpec.uri.authority).build()
                                 downloadCacheDataSource.open(newSpec)
                             }
                             "placeholder" -> {
-                                // If it's a placeholder, don't open anything. Return 0 bytes.
-                                // This prevents the HttpDataSource from ever seeing it.
                                 Timber.d("DataSource: Intercepting 'placeholder://' URI. Returning 0.")
                                 0
                             }
                             else -> {
-                                // For everything else (http, https, content), use the default source.
-                                Timber.d("DataSource: Routing '${dataSpec.uri.scheme}' to default/media cache source.")
-                                defaultSource.open(dataSpec)
+                                // Pass 'holodex://', 'http', 'https', 'file' etc. to the resolving source.
+                                // The resolving source will check if it needs to modify the URI, then pass it down.
+                                resolvingDataSource.open(dataSpec)
                             }
                         }
-                        // --- END OF FIX ---
                     }
                 }
             }
         }
-        // --- END OF REPLACEMENT ---
     }
 
 

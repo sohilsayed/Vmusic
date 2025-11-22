@@ -33,13 +33,20 @@ class MediaItemMapper(
     private val sharedPreferences: SharedPreferences
 ) {
 
-    fun toMedia3MediaItem(playbackItem: PlaybackItem): MediaItem? {
+    fun toMedia3MediaItem(playbackItem: PlaybackItem): MediaItem { // Removed nullable return type (?)
         Timber.tag(MAPPER_TAG).d("toMedia3MediaItem: Mapping PlaybackItem ID '${playbackItem.id}'")
 
-        if (playbackItem.streamUri.isNullOrBlank()) {
-            Timber.e("CRITICAL: PlaybackItem ${playbackItem.id} has no streamUri. Cannot create MediaItem. Skipping.")
-            return null
+        // --- FIX START ---
+        // Instead of returning null, we determine the URI.
+        // If it exists (e.g. downloaded file), use it.
+        // If not, use the custom scheme to trigger Just-In-Time resolution.
+        val uriToUse = if (!playbackItem.streamUri.isNullOrBlank()) {
+            playbackItem.streamUri!!.toUri()
+        } else {
+            // This triggers HolodexResolvingDataSource
+            "holodex://resolve/${playbackItem.videoId}".toUri()
         }
+        // --- FIX END ---
 
         val extras = Bundle().apply {
             putString(EXTRA_KEY_HOLODEX_VIDEO_ID, playbackItem.videoId)
@@ -67,17 +74,12 @@ class MediaItemMapper(
         val mediaItemBuilder = MediaItem.Builder()
             .setMediaId(playbackItem.id)
             .setMediaMetadata(mediaMetadata)
+            .setUri(uriToUse) // Use the determined URI
 
-        if (!playbackItem.streamUri.isNullOrBlank()) {
-            mediaItemBuilder.setUri(playbackItem.streamUri)
-        } else {
-            Timber.e("CRITICAL: PlaybackItem ${playbackItem.id} converted to MediaItem with no streamUri.")
-        }
-
-        val isLocalFile = playbackItem.streamUri?.startsWith("content://") == true
+        val isLocalFile = uriToUse.toString().startsWith("content://") || uriToUse.toString().startsWith("file://")
 
         if (!isLocalFile && playbackItem.clipStartSec != null && playbackItem.clipEndSec != null && playbackItem.clipEndSec > playbackItem.clipStartSec) {
-            // This is a stream, apply clipping as before.
+            // This is a stream (or resolved stream), apply clipping.
             mediaItemBuilder.setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(playbackItem.clipStartSec * 1000L)
@@ -87,7 +89,6 @@ class MediaItemMapper(
             )
             Timber.d("Applied STREAM clipping to MediaItem ${playbackItem.id}: Start: ${playbackItem.clipStartSec}s, End: ${playbackItem.clipEndSec}s")
         } else {
-            // This is either a local file or a full video stream, no clipping needed.
             Timber.d("Skipping clipping for MediaItem ${playbackItem.id}. Is local file: $isLocalFile")
         }
 
