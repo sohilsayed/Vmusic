@@ -13,6 +13,9 @@ import com.example.holodex.data.repository.HolodexRepository
 import com.example.holodex.playback.PlaybackRequestManager
 import com.example.holodex.playback.domain.model.PlaybackItem
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -47,9 +50,9 @@ class DownloadsViewModel @UnstableApi
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    val filteredDownloads: StateFlow<List<DownloadedItemEntity>> =
+    val filteredDownloads: StateFlow<ImmutableList<DownloadedItemEntity>> =
         combine(allDownloads, _searchQuery) { downloads, query ->
-            if (query.isBlank()) {
+            val list = if (query.isBlank()) {
                 downloads
             } else {
                 downloads.filter {
@@ -57,10 +60,11 @@ class DownloadsViewModel @UnstableApi
                             it.artistText.contains(query, ignoreCase = true)
                 }
             }
+            list.toImmutableList() // Convert here
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
+            initialValue = persistentListOf()
         )
 
     fun onSearchQueryChanged(query: String) {

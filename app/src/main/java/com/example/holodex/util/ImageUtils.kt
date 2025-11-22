@@ -1,8 +1,8 @@
 // File: java/com/example/holodex/util/ImageUtils.kt
 package com.example.holodex.util // Or your preferred util package
 
+import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.playback.domain.model.PlaybackItem
-import com.example.holodex.viewmodel.AppPreferenceConstants
 import timber.log.Timber
 
 // Regex to find the size part of an iTunes/mzstatic image URL

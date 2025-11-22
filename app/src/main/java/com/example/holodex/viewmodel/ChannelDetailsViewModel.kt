@@ -13,6 +13,9 @@ import com.example.holodex.util.PaletteExtractor
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toVideoShell
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.collections.immutable.ImmutableList // Import
+import kotlinx.collections.immutable.persistentListOf // Import
+import kotlinx.collections.immutable.toImmutableList // Import
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import org.orbitmvi.orbit.Container
@@ -29,10 +32,10 @@ data class ChannelDetailsState(
 
     // Holodex Data
     val discoveryContent: DiscoveryResponse? = null,
-    val popularSongs: List<UnifiedDisplayItem> = emptyList(),
+    val popularSongs: ImmutableList<UnifiedDisplayItem> = persistentListOf(), // Changed to ImmutableList
 
     // External Data
-    val externalMusicItems: List<UnifiedDisplayItem> = emptyList(),
+    val externalMusicItems: ImmutableList<UnifiedDisplayItem> = persistentListOf(), // Changed to ImmutableList
     val nextPageCursor: Page? = null,
     val isLoadingMore: Boolean = false,
     val endOfList: Boolean = false,
@@ -65,7 +68,6 @@ class ChannelDetailsViewModel @Inject constructor(
         if (channelId.isNotBlank()) {
             initializeChannel()
         } else {
-            // FIX: Wrapped the reduce call in an intent block
             intent {
                 reduce { state.copy(isLoading = false, error = "Invalid Channel ID") }
             }
@@ -75,7 +77,6 @@ class ChannelDetailsViewModel @Inject constructor(
     private fun initializeChannel() = intent {
         reduce { state.copy(isLoading = true, error = null) }
 
-        // Check if external first
         val externalChannel = localRepository.getExternalChannel(channelId)
 
         if (externalChannel != null) {
@@ -105,7 +106,6 @@ class ChannelDetailsViewModel @Inject constructor(
             )
         }
 
-        // Load initial music
         loadMoreExternalMusic(isInitial = true)
     }
 
@@ -136,7 +136,7 @@ class ChannelDetailsViewModel @Inject constructor(
                         channelDetails = details,
                         dynamicTheme = theme,
                         discoveryContent = discovery,
-                        popularSongs = popular
+                        popularSongs = popular.toImmutableList() // Convert here
                     )
                 }
             } else {
@@ -160,12 +160,12 @@ class ChannelDetailsViewModel @Inject constructor(
             val nextCursor = fetcherResult.nextPageCursor as? Page
 
             reduce {
-                val currentList = if (isInitial) emptyList() else state.externalMusicItems
+                val currentList = if (isInitial) persistentListOf() else state.externalMusicItems
                 state.copy(
-                    externalMusicItems = currentList + newItems,
+                    externalMusicItems = (currentList + newItems).toImmutableList(), // Convert here
                     nextPageCursor = nextCursor,
                     endOfList = nextCursor == null,
-                    isLoading = false, // Clear main loading if this was initial
+                    isLoading = false,
                     isLoadingMore = false
                 )
             }

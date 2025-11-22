@@ -20,6 +20,9 @@ import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.playback.util.formatDurationSeconds
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import org.orbitmvi.orbit.Container
@@ -34,9 +37,9 @@ enum class ItemCategory { SYNCABLE_SEGMENT, VIRTUAL_SEGMENT, FULL_VIDEO }
 
 data class FavoritesState(
     val likedItemsMap: Map<String, StorageLocation> = emptyMap(),
-    val unifiedLikedSegments: List<UnifiedDisplayItem> = emptyList(),
-    val unifiedFavoritedVideos: List<UnifiedDisplayItem> = emptyList(),
-    val favoriteChannels: List<Any> = emptyList(),
+    val unifiedLikedSegments: ImmutableList<UnifiedDisplayItem> = persistentListOf(), // Changed
+    val unifiedFavoritedVideos: ImmutableList<UnifiedDisplayItem> = persistentListOf(), // Changed
+    val favoriteChannels: ImmutableList<Any> = persistentListOf(), // Changed
     val isLoading: Boolean = true
 )
 
@@ -112,10 +115,10 @@ class FavoritesViewModel @Inject constructor(
                         // This transformation creates the new state object
                         FavoritesState(
                             likedItemsMap = map,
-                            unifiedLikedSegments = unifiedSegments,
-                            unifiedFavoritedVideos = unifiedVideos,
-                            favoriteChannels = unifiedChannels,
-                            isLoading = false // Data has arrived
+                            unifiedLikedSegments = unifiedSegments.toImmutableList(),
+                            unifiedFavoritedVideos = unifiedVideos.toImmutableList(),
+                            favoriteChannels = unifiedChannels.toImmutableList(),
+                            isLoading = false
                         )
                     }.collect { newState ->
                         // This reduce block is now correctly inside the intent's scope.

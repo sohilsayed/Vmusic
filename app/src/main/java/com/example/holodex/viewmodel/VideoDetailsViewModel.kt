@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/viewmodel/VideoDetailsViewModel.kt
 package com.example.holodex.viewmodel
 
 import androidx.compose.ui.graphics.Color
@@ -22,6 +21,9 @@ import com.example.holodex.viewmodel.mappers.toPlaybackItem
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toVirtualSegmentUnifiedDisplayItem
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.collections.immutable.ImmutableList // Import
+import kotlinx.collections.immutable.persistentListOf // Import
+import kotlinx.collections.immutable.toImmutableList // Import
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -60,8 +62,8 @@ class VideoDetailsViewModel @Inject constructor(
     private val _transientMessage = MutableStateFlow<String?>(null)
     val transientMessage: StateFlow<String?> = _transientMessage.asStateFlow()
 
-    private val _unifiedSongItems = MutableStateFlow<List<UnifiedDisplayItem>>(emptyList())
-    val unifiedSongItems: StateFlow<List<UnifiedDisplayItem>> = _unifiedSongItems.asStateFlow()
+    private val _unifiedSongItems = MutableStateFlow<ImmutableList<UnifiedDisplayItem>>(persistentListOf())
+    val unifiedSongItems: StateFlow<ImmutableList<UnifiedDisplayItem>> = _unifiedSongItems.asStateFlow()
 
     private val _dynamicTheme = MutableStateFlow(DynamicTheme.default(Color.Black, Color.White))
     val dynamicTheme: StateFlow<DynamicTheme> = _dynamicTheme.asStateFlow()
@@ -77,10 +79,8 @@ class VideoDetailsViewModel @Inject constructor(
                         (prefetchedItem.channel.org == "External" || prefetchedItem.songs != null)
 
                 if (isPrefetchedItemComplete) {
-                    Timber.d("Using COMPLETE pre-fetched video data for $videoId")
-                    processItem(prefetchedItem!!) // We know it's not null here
+                    processItem(prefetchedItem!!)
                 } else {
-                    Timber.d("Pre-fetched data for $videoId is INCOMPLETE or missing. Fetching full details from network.")
                     holodexRepository.getVideoWithSongs(videoId, forceRefresh = false)
                         .onSuccess { processItem(it) }
                         .onFailure { _error.value = "Failed to load video details: ${it.localizedMessage}" }
@@ -93,25 +93,20 @@ class VideoDetailsViewModel @Inject constructor(
         }
     }
 
-    // A single, unified processing function
     private fun processItem(videoItem: HolodexVideoItem) {
         _videoDetails.value = videoItem
         viewModelScope.launch {
             updateTheme(videoItem.id)
 
-            // *** THE CORRECTED LOGIC ***
-            // Check if the item is explicitly marked as External OR if it's a Holodex item with no songs.
             val isEffectivelySegmentless = videoItem.channel.org == "External" || videoItem.songs.isNullOrEmpty()
 
             if (isEffectivelySegmentless) {
-                // Process as a single virtual segment
                 val likedIds = holodexRepository.likedItemIds.first()
                 val isLiked = likedIds.contains(videoItem.id)
                 val virtualSegment = videoItem.toVirtualSegmentUnifiedDisplayItem(isLiked, isDownloaded = false)
-                _unifiedSongItems.value = listOf(virtualSegment)
+                _unifiedSongItems.value = persistentListOf(virtualSegment) // Immutable list
             } else {
-                // Process the existing song list from the Holodex item
-                val songs = videoItem.songs!! // We know it's not null or empty here
+                val songs = videoItem.songs!!
                 val likedIds = holodexRepository.likedItemIds.first()
                 val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
                 val unifiedItems = songs.sortedBy { it.start }.map { song ->
@@ -121,11 +116,12 @@ class VideoDetailsViewModel @Inject constructor(
                         isDownloaded = downloadedIds.contains("${videoItem.id}_${song.start}")
                     )
                 }
-                _unifiedSongItems.value = unifiedItems
+                _unifiedSongItems.value = unifiedItems.toImmutableList() // Convert to Immutable
             }
         }
     }
 
+    // ... (rest of file remains unchanged)
     private suspend fun updateTheme(videoId: String) {
         val artworkUrl = getYouTubeThumbnailUrl(videoId, ThumbnailQuality.MAX).firstOrNull()
         _dynamicTheme.value = paletteExtractor.extractThemeFromUrl(
@@ -138,7 +134,6 @@ class VideoDetailsViewModel @Inject constructor(
 
     fun playSegment(startIndex: Int) {
         viewModelScope.launch {
-            // This now works for both cases, as _unifiedSongItems is always populated correctly
             val itemsToPlay = _unifiedSongItems.value.map { it.toPlaybackItem() }
             if (startIndex in itemsToPlay.indices) {
                 playbackRequestManager.submitPlaybackRequest(items = itemsToPlay, startIndex = startIndex)

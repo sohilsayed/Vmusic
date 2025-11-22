@@ -99,6 +99,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.kotlinx.collections.immutable)
 
     // Lifecycle KTX (using bundle)
     implementation(libs.bundles.lifecycle.ktx)

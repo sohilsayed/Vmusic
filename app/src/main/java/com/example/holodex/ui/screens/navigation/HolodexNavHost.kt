@@ -14,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -40,8 +39,9 @@ import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import com.example.holodex.viewmodel.SettingsViewModel
 import com.example.holodex.viewmodel.VideoDetailsViewModel
 import com.example.holodex.viewmodel.VideoListViewModel
+import org.orbitmvi.orbit.compose.collectAsState // <--- Import
 
-@SuppressLint("UnstableApi") // For Media3
+@SuppressLint("UnstableApi")
 @Composable
 fun HolodexNavHost(
     navController: NavHostController,
@@ -55,6 +55,7 @@ fun HolodexNavHost(
         startDestination = AppDestinations.LIBRARY_ROUTE,
         modifier = modifier.fillMaxSize()
     ) {
+        // ... (Other composables unchanged: Discovery, ForYou, Library, Downloads)
         composable(AppDestinations.DISCOVERY_ROUTE) {
             DiscoveryScreen(navController = navController)
         }
@@ -65,7 +66,10 @@ fun HolodexNavHost(
 
         composable(AppDestinations.HOME_ROUTE) {
             val settingsViewModel: SettingsViewModel = hiltViewModel()
-            val currentApiKey by settingsViewModel.currentApiKey.collectAsStateWithLifecycle()
+
+            // FIX: Collect state from Orbit
+            val state by settingsViewModel.collectAsState()
+            val currentApiKey = state.currentApiKey
 
             if (currentApiKey.isBlank()) {
                 ApiKeyMissingContent(navController = navController)
@@ -87,7 +91,6 @@ fun HolodexNavHost(
         }
 
         composable(AppDestinations.SETTINGS_ROUTE) {
-            // We re-inject the Activity-Scoped VM here to ensure we refresh the list if API key changes
             val vListVm: VideoListViewModel = hiltViewModel(activity)
             SettingsScreen(
                 navController = navController,
@@ -100,8 +103,7 @@ fun HolodexNavHost(
             LoginScreen(onLoginSuccess = { navController.popBackStack() })
         }
 
-        // --- Details Screens (Parameterized) ---
-
+        // ... (Parameterized composables unchanged)
         composable(
             route = "external_channel_details/{${ChannelDetailsViewModel.CHANNEL_ID_ARG}}",
             arguments = listOf(navArgument(ChannelDetailsViewModel.CHANNEL_ID_ARG) { type = NavType.StringType })

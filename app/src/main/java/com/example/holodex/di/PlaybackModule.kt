@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
 import androidx.media3.exoplayer.upstream.DefaultAllocator
+import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.data.db.DownloadedItemDao
 import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
@@ -41,7 +42,6 @@ import com.example.holodex.playback.domain.repository.PlaybackRepository
 import com.example.holodex.playback.domain.repository.PlaybackStateRepository
 import com.example.holodex.playback.domain.repository.StreamResolverRepository
 import com.example.holodex.playback.player.Media3PlayerController
-import com.example.holodex.viewmodel.AppPreferenceConstants
 import com.example.holodex.viewmodel.autoplay.AutoplayItemProvider
 import com.example.holodex.viewmodel.autoplay.ContinuationManager
 import dagger.Module

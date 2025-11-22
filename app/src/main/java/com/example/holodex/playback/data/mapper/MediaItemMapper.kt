@@ -9,10 +9,10 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import com.example.holodex.R
+import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.playback.domain.model.PersistedPlaybackItem
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.util.getHighResArtworkUrl
-import com.example.holodex.viewmodel.AppPreferenceConstants
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
 

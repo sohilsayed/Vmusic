@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/ui/theme/Theme.kt
 package com.example.holodex.ui.theme
 
 import android.os.Build
@@ -10,19 +9,16 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.holodex.data.ThemePreference // <--- Import this
 import com.example.holodex.viewmodel.SettingsViewModel
-import com.example.holodex.viewmodel.ThemePreference
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
+import org.orbitmvi.orbit.compose.collectAsState // <--- Import this
 
-// Your color definitions from Color.kt are implicitly available if in the same package,
-// or import them if Color.kt is in a different sub-package.
-// Assuming they are in the same package 'com.example.holodex.ui.theme'
-
+// ... (Keep AppDarkColorScheme and AppLightColorScheme definitions as they are) ...
 private val AppDarkColorScheme = darkColorScheme(
     primary = md_theme_dark_primary,
     onPrimary = md_theme_dark_onPrimary,
@@ -42,7 +38,7 @@ private val AppDarkColorScheme = darkColorScheme(
     onErrorContainer = md_theme_dark_onErrorContainer,
     background = md_theme_dark_background,
     onBackground = md_theme_dark_onBackground,
-    surface = md_theme_dark_surface, // Crucial for NavigationBar color
+    surface = md_theme_dark_surface,
     onSurface = md_theme_dark_onSurface,
     surfaceVariant = md_theme_dark_surfaceVariant,
     onSurfaceVariant = md_theme_dark_onSurfaceVariant,
@@ -74,7 +70,7 @@ private val AppLightColorScheme = lightColorScheme(
     onErrorContainer = md_theme_light_onErrorContainer,
     background = md_theme_light_background,
     onBackground = md_theme_light_onBackground,
-    surface = md_theme_light_surface, // Crucial for NavigationBar color
+    surface = md_theme_light_surface,
     onSurface = md_theme_light_onSurface,
     surfaceVariant = md_theme_light_surfaceVariant,
     onSurfaceVariant = md_theme_light_onSurfaceVariant,
@@ -90,15 +86,17 @@ private val AppLightColorScheme = lightColorScheme(
 @Composable
 fun HolodexMusicTheme(
     settingsViewModel: SettingsViewModel = hiltViewModel(),
-    dynamicColor: Boolean = true, // Monet support (Android 12+)
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val themePreference by settingsViewModel.currentThemePreference.collectAsState()
+    // FIX: Collect state from Orbit
+    val state by settingsViewModel.collectAsState()
 
-    val useDarkTheme = when (themePreference) {
+    // FIX: Access property from state (renamed to currentTheme)
+    val useDarkTheme = when (state.currentTheme) {
         ThemePreference.LIGHT -> false
         ThemePreference.DARK -> true
-        else -> isSystemInDarkTheme() // ThemePreference.SYSTEM or default
+        else -> isSystemInDarkTheme()
     }
 
     val colorScheme = when {
@@ -106,31 +104,27 @@ fun HolodexMusicTheme(
             val context = LocalContext.current
             if (useDarkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        // --- Use your AppColorScheme variables now ---
         useDarkTheme -> AppDarkColorScheme
         else -> AppLightColorScheme
     }
 
-    // System UI Controller for status/nav bar colors (edge-to-edge)
-    // This SideEffect should be here, within HolodexMusicTheme, so it reacts to colorScheme changes.
-    // If it's in MainActivity -> HolodexApp, it might not recompose when only the theme changes internally.
     val systemUiController = rememberSystemUiController()
     SideEffect {
         systemUiController.setStatusBarColor(
             color = Color.Transparent,
-            darkIcons = !useDarkTheme // Dark icons on light status bar, light icons on dark status bar
+            darkIcons = !useDarkTheme
         )
         systemUiController.setNavigationBarColor(
-            color = Color.Transparent, // System nav bar transparent for edge-to-edge
+            color = Color.Transparent,
             darkIcons = !useDarkTheme,
-            navigationBarContrastEnforced = false // Allows full transparency
+            navigationBarContrastEnforced = false
         )
     }
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography, // Assuming Typography is defined in Type.kt
-        shapes = Shapes,         // Assuming Shapes is defined in Shape.kt
+        typography = Typography,
+        shapes = Shapes,
         content = content
     )
 }

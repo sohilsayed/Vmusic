@@ -16,18 +16,19 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.holodex.MyApp
 import com.example.holodex.background.SyncWorker
+import com.example.holodex.data.AppPreferenceConstants
+import com.example.holodex.data.ThemePreference
 import com.example.holodex.data.download.LegacyDownloadScanner
 import com.example.holodex.data.repository.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.orbitmvi.orbit.Container
+import org.orbitmvi.orbit.ContainerHost
+import org.orbitmvi.orbit.viewmodel.container
 import timber.log.Timber
 import javax.inject.Inject
 
+// --- States ---
 sealed class ApiKeySaveResult {
     object Success : ApiKeySaveResult()
     object Empty : ApiKeySaveResult()
@@ -35,48 +36,37 @@ sealed class ApiKeySaveResult {
     object Idle : ApiKeySaveResult()
 }
 
-object ThemePreference {
-    const val KEY = "app_theme_preference"
-    const val LIGHT = "LIGHT"
-    const val DARK = "DARK"
-    const val SYSTEM = "SYSTEM"
-}
-
-// Centralized preference constants
-object AppPreferenceConstants {
-    // Image Quality
-    const val PREF_IMAGE_QUALITY = "pref_image_quality"
-    const val IMAGE_QUALITY_AUTO = "AUTO"
-    const val IMAGE_QUALITY_MEDIUM = "MEDIUM"
-    const val IMAGE_QUALITY_LOW = "LOW"
-
-    // Audio Quality (for NewPipeExtractor)
-    const val PREF_AUDIO_QUALITY = "pref_audio_quality"
-    const val AUDIO_QUALITY_BEST = "BEST"
-    const val AUDIO_QUALITY_STANDARD = "STANDARD"
-    const val AUDIO_QUALITY_SAVER = "SAVER"
-
-    // Paging Configuration (Data Loading Intensity for Lists)
-    const val PREF_LIST_LOADING_CONFIG = "pref_list_loading_config"
-    const val LIST_LOADING_NORMAL = "NORMAL"
-    const val LIST_LOADING_REDUCED = "REDUCED"
-    const val LIST_LOADING_MINIMAL = "MINIMAL"
-
-    // ExoPlayer Buffering Strategy
-    const val PREF_BUFFERING_STRATEGY = "pref_buffering_strategy"
-    const val BUFFERING_STRATEGY_AGGRESSIVE = "AGGRESSIVE_START"
-    const val BUFFERING_STRATEGY_BALANCED = "BALANCED"
-    const val BUFFERING_STRATEGY_STABLE = "STABLE_PLAYBACK"
-
-    const val PREF_AUTOPLAY_NEXT_VIDEO = "pref_autoplay_next_video"
-    const val PREF_DOWNLOAD_LOCATION = "pref_download_location_uri"
-
-}
 sealed class ScanStatus {
     object Idle : ScanStatus()
     object Scanning : ScanStatus()
     data class Complete(val importedCount: Int) : ScanStatus()
     data class Error(val message: String) : ScanStatus()
+}
+
+// Single Consolidated State
+data class SettingsState(
+    val currentApiKey: String = "",
+    val apiKeySaveResult: ApiKeySaveResult = ApiKeySaveResult.Idle,
+    val cacheClearStatus: String? = null,
+    val scanStatus: ScanStatus = ScanStatus.Idle,
+    val transientMessage: String? = null,
+
+    // Preferences
+    val currentTheme: String = ThemePreference.SYSTEM,
+    val currentImageQuality: String = AppPreferenceConstants.IMAGE_QUALITY_AUTO,
+    val currentAudioQuality: String = AppPreferenceConstants.AUDIO_QUALITY_BEST,
+    val currentListLoadingConfig: String = AppPreferenceConstants.LIST_LOADING_NORMAL,
+    val currentBufferingStrategy: String = AppPreferenceConstants.BUFFERING_STRATEGY_AGGRESSIVE,
+    val downloadLocation: String = "",
+
+    // DataStore values
+    val autoplayEnabled: Boolean = true,
+    val shuffleOnPlayStartEnabled: Boolean = false
+)
+
+// Side Effects
+sealed class SettingsSideEffect {
+    data class ShowToast(val message: String) : SettingsSideEffect()
 }
 
 @HiltViewModel
@@ -86,310 +76,195 @@ class SettingsViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val workManager: WorkManager,
     private val legacyDownloadScanner: LegacyDownloadScanner
+) : ContainerHost<SettingsState, SettingsSideEffect>, ViewModel() {
 
-) : ViewModel() {
-
-    private val _apiKeySaveResult = MutableStateFlow<ApiKeySaveResult>(ApiKeySaveResult.Idle)
-    val apiKeySaveResult: StateFlow<ApiKeySaveResult> = _apiKeySaveResult.asStateFlow()
-
-    private val _currentApiKey = MutableStateFlow<String>(loadInitialApiKey())
-    val currentApiKey: StateFlow<String> = _currentApiKey.asStateFlow()
-
-    private val _cacheClearStatus = MutableStateFlow<String?>(null)
-    val cacheClearStatus: StateFlow<String?> = _cacheClearStatus.asStateFlow()
-
-    private val _currentThemePreference = MutableStateFlow(loadThemePreference())
-    val currentThemePreference: StateFlow<String> = _currentThemePreference.asStateFlow()
-
-    private val _currentImageQuality = MutableStateFlow(loadImageQualityPreference())
-    val currentImageQuality: StateFlow<String> = _currentImageQuality.asStateFlow()
-
-    private val _currentAudioQuality = MutableStateFlow(loadAudioQualityPreference())
-    val currentAudioQuality: StateFlow<String> = _currentAudioQuality.asStateFlow()
-
-    private val _currentListLoadingConfig = MutableStateFlow(loadListLoadingConfigPreference())
-    val currentListLoadingConfig: StateFlow<String> = _currentListLoadingConfig.asStateFlow()
-
-    private val _currentBufferingStrategy = MutableStateFlow(loadBufferingStrategyPreference())
-    val currentBufferingStrategy: StateFlow<String> = _currentBufferingStrategy.asStateFlow()
-
-    private val _downloadLocation = MutableStateFlow(loadDownloadLocation())
-    val downloadLocation: StateFlow<String> = _downloadLocation.asStateFlow()
-
-    private val _scanStatus = MutableStateFlow<ScanStatus>(ScanStatus.Idle)
-    val scanStatus: StateFlow<ScanStatus> = _scanStatus.asStateFlow()
-
-    val autoplayNextVideoEnabled: StateFlow<Boolean> = userPreferencesRepository.autoplayEnabled
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = true // Default value should match what's in UserPreferencesRepository
-        )
-    val shuffleOnPlayStartEnabled: StateFlow<Boolean> = userPreferencesRepository.shuffleOnPlayStartEnabled
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = false // Matches the repository default
-        )
+    override val container: Container<SettingsState, SettingsSideEffect> = container(SettingsState())
 
     init {
-        Timber.d("SettingsViewModel initialized.")
-        // The collectLatest below is now redundant for the autoplayNextVideoEnabled flow itself,
-        // as stateIn already makes it hot and provides the latest value.
-        // It could be kept if you needed to perform side-effects *every time* the preference changes
-        // within the ViewModel's scope, but usually, the UI collects it directly.
-        /*
-        viewModelScope.launch {
-            userPreferencesRepository.autoplayEnabled.collectLatest { enabled ->
-                Timber.d("SettingsViewModel: Autoplay preference updated to $enabled.")
+        // Initialize State from SharedPreferences
+        val apiKey = sharedPreferences.getString("API_KEY", "") ?: ""
+        val theme = sharedPreferences.getString(ThemePreference.KEY, ThemePreference.SYSTEM) ?: ThemePreference.SYSTEM
+        val imgQuality = sharedPreferences.getString(AppPreferenceConstants.PREF_IMAGE_QUALITY, AppPreferenceConstants.IMAGE_QUALITY_AUTO) ?: AppPreferenceConstants.IMAGE_QUALITY_AUTO
+        val audioQuality = sharedPreferences.getString(AppPreferenceConstants.PREF_AUDIO_QUALITY, AppPreferenceConstants.AUDIO_QUALITY_BEST) ?: AppPreferenceConstants.AUDIO_QUALITY_BEST
+        val listLoading = sharedPreferences.getString(AppPreferenceConstants.PREF_LIST_LOADING_CONFIG, AppPreferenceConstants.LIST_LOADING_NORMAL) ?: AppPreferenceConstants.LIST_LOADING_NORMAL
+        val buffering = sharedPreferences.getString(AppPreferenceConstants.PREF_BUFFERING_STRATEGY, AppPreferenceConstants.BUFFERING_STRATEGY_AGGRESSIVE) ?: AppPreferenceConstants.BUFFERING_STRATEGY_AGGRESSIVE
+        val downloadLoc = sharedPreferences.getString(AppPreferenceConstants.PREF_DOWNLOAD_LOCATION, "") ?: ""
+
+        intent {
+            reduce {
+                state.copy(
+                    currentApiKey = apiKey,
+                    currentTheme = theme,
+                    currentImageQuality = imgQuality,
+                    currentAudioQuality = audioQuality,
+                    currentListLoadingConfig = listLoading,
+                    currentBufferingStrategy = buffering,
+                    downloadLocation = downloadLoc
+                )
             }
         }
-        */
-    }
-    fun runLegacyFileScan() {
-        if (_scanStatus.value is ScanStatus.Scanning) return // Prevent multiple scans
 
+        // Observe DataStore flows
         viewModelScope.launch {
-            _scanStatus.value = ScanStatus.Scanning
-            try {
-                val count = legacyDownloadScanner.scanAndImportLegacyDownloads()
-                _scanStatus.value = ScanStatus.Complete(count)
-            } catch (e: Exception) {
-                Timber.e(e, "Legacy scan failed in ViewModel")
-                _scanStatus.value = ScanStatus.Error("Scan failed: ${e.localizedMessage}")
-            }
-        }
-    }
-
-    fun resetScanStatus() {
-        _scanStatus.value = ScanStatus.Idle
-    }
-    fun triggerManualSync() {
-        viewModelScope.launch {
-            Timber.i("SettingsViewModel: Manual sync triggered by user.")
-            _transientMessage.emit("Syncing account data...") // Use the existing message flow for feedback
-
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .build()
-
-            val immediateSyncRequest = OneTimeWorkRequestBuilder<SyncWorker>()
-                .setConstraints(constraints)
-                .build()
-
-            // Enqueue as unique work with REPLACE to ensure it runs now,
-            // even if a periodic one was scheduled soon.
-            workManager.enqueueUniqueWork(
-                "ManualSync",
-                ExistingWorkPolicy.REPLACE,
-                immediateSyncRequest
-            )
-        }
-    }
-    private val _transientMessage = MutableStateFlow<String?>(null)
-    val transientMessage: StateFlow<String?> = _transientMessage.asStateFlow()
-
-    fun clearTransientMessage() {
-        _transientMessage.value = null
-    }
-    private fun loadDownloadLocation(): String {
-        return sharedPreferences.getString(AppPreferenceConstants.PREF_DOWNLOAD_LOCATION, "") ?: ""
-    }
-
-    fun saveDownloadLocation(uri: Uri) {
-        viewModelScope.launch {
-            try {
-                // Take persistent permission to access the folder
-                val contentResolver = application.contentResolver
-                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                contentResolver.takePersistableUriPermission(uri, flags)
-
-                val uriString = uri.toString()
-                sharedPreferences.edit { putString(AppPreferenceConstants.PREF_DOWNLOAD_LOCATION, uriString) }
-                _downloadLocation.value = uriString
-                Timber.i("Saved new download location URI: $uriString")
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to save download location permission or preference.")
-                // Optionally emit an error to a snackbar/toast
-            }
-        }
-    }
-
-    fun clearDownloadLocation() {
-        viewModelScope.launch {
-            val currentUriString = _downloadLocation.value
-            if (currentUriString.isNotEmpty()) {
-                try {
-                    val uri = currentUriString.toUri()
-                    val contentResolver = application.contentResolver
-                    val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    contentResolver.releasePersistableUriPermission(uri, flags)
-                    Timber.i("Released persistable URI permission for: $currentUriString")
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to release persistable URI permission.")
+            userPreferencesRepository.autoplayEnabled.collect { enabled ->
+                intent {
+                    reduce { state.copy(autoplayEnabled = enabled) }
                 }
             }
-            sharedPreferences.edit { remove(AppPreferenceConstants.PREF_DOWNLOAD_LOCATION) }
-            _downloadLocation.value = ""
         }
-    }
-
-    private fun loadInitialApiKey(): String {
-        return sharedPreferences.getString("API_KEY", "") ?: ""
-    }
-
-    fun saveApiKey(key: String) {
         viewModelScope.launch {
-            val trimmedKey = key.trim()
-            if (trimmedKey.isBlank()) {
-                _apiKeySaveResult.value = ApiKeySaveResult.Empty
-                return@launch
-            }
-            try {
-                sharedPreferences.edit { putString("API_KEY", trimmedKey) }
-                _currentApiKey.value = trimmedKey
-                _apiKeySaveResult.value = ApiKeySaveResult.Success
-            } catch (e: Exception) {
-                Timber.tag("SettingsViewModel").e(e, "Error saving API key")
-                _apiKeySaveResult.value = ApiKeySaveResult.Error("Failed to save API key.")
+            userPreferencesRepository.shuffleOnPlayStartEnabled.collect { enabled ->
+                intent {
+                    reduce { state.copy(shuffleOnPlayStartEnabled = enabled) }
+                }
             }
         }
     }
 
-    fun resetApiKeySaveResult() {
-        _apiKeySaveResult.value = ApiKeySaveResult.Idle
+    // --- Actions ---
+
+    fun saveApiKey(key: String) = intent {
+        val trimmedKey = key.trim()
+        if (trimmedKey.isBlank()) {
+            reduce { state.copy(apiKeySaveResult = ApiKeySaveResult.Empty) }
+            return@intent
+        }
+        runCatching {
+            sharedPreferences.edit {
+                putString("API_KEY", trimmedKey)
+            }
+        }.onSuccess {
+            reduce { state.copy(currentApiKey = trimmedKey, apiKeySaveResult = ApiKeySaveResult.Success) }
+        }.onFailure {
+            reduce { state.copy(apiKeySaveResult = ApiKeySaveResult.Error("Failed to save API key.")) }
+        }
+    }
+
+    fun resetApiKeySaveResult() = intent {
+        reduce { state.copy(apiKeySaveResult = ApiKeySaveResult.Idle) }
+    }
+
+    fun runLegacyFileScan() = intent {
+        if (state.scanStatus is ScanStatus.Scanning) return@intent
+        reduce { state.copy(scanStatus = ScanStatus.Scanning) }
+
+        runCatching {
+            legacyDownloadScanner.scanAndImportLegacyDownloads()
+        }.onSuccess { count ->
+            reduce { state.copy(scanStatus = ScanStatus.Complete(count)) }
+        }.onFailure { e ->
+            reduce { state.copy(scanStatus = ScanStatus.Error("Scan failed: ${e.localizedMessage}")) }
+        }
+    }
+
+    fun resetScanStatus() = intent {
+        reduce { state.copy(scanStatus = ScanStatus.Idle) }
+    }
+
+    fun triggerManualSync() = intent {
+        postSideEffect(SettingsSideEffect.ShowToast("Syncing account data..."))
+        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+        val request = OneTimeWorkRequestBuilder<SyncWorker>().setConstraints(constraints).build()
+        workManager.enqueueUniqueWork("ManualSync", ExistingWorkPolicy.REPLACE, request)
+    }
+
+    // --- Preferences Setters ---
+
+    fun setThemePreference(theme: String) = intent {
+        sharedPreferences.edit {
+            putString(ThemePreference.KEY, theme)
+        }
+        reduce { state.copy(currentTheme = theme) }
+    }
+
+    fun setImageQualityPreference(quality: String) = intent {
+        sharedPreferences.edit {
+            putString(AppPreferenceConstants.PREF_IMAGE_QUALITY, quality)
+        }
+        reduce { state.copy(currentImageQuality = quality) }
+    }
+
+    fun setAudioQualityPreference(quality: String) = intent {
+        sharedPreferences.edit {
+            putString(AppPreferenceConstants.PREF_AUDIO_QUALITY, quality)
+        }
+        reduce { state.copy(currentAudioQuality = quality) }
+    }
+
+    fun setListLoadingConfigPreference(config: String) = intent {
+        sharedPreferences.edit {
+            putString(AppPreferenceConstants.PREF_LIST_LOADING_CONFIG, config)
+        }
+        reduce { state.copy(currentListLoadingConfig = config) }
+    }
+
+    fun setBufferingStrategyPreference(strategy: String) = intent {
+        sharedPreferences.edit {
+            putString(AppPreferenceConstants.PREF_BUFFERING_STRATEGY, strategy)
+        }
+        reduce { state.copy(currentBufferingStrategy = strategy) }
+    }
+
+    fun saveDownloadLocation(uri: Uri) = intent {
+        runCatching {
+            val contentResolver = application.contentResolver
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            contentResolver.takePersistableUriPermission(uri, flags)
+
+            val uriString = uri.toString()
+            sharedPreferences.edit {
+                putString(AppPreferenceConstants.PREF_DOWNLOAD_LOCATION, uriString)
+            }
+            reduce { state.copy(downloadLocation = uriString) }
+        }.onFailure {
+            Timber.e(it, "Failed to save download location")
+            postSideEffect(SettingsSideEffect.ShowToast("Failed to save folder permission"))
+        }
+    }
+
+    fun clearDownloadLocation() = intent {
+        val currentUri = state.downloadLocation
+        if (currentUri.isNotEmpty()) {
+            try {
+                val contentResolver = application.contentResolver
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                contentResolver.releasePersistableUriPermission(currentUri.toUri(), flags)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to release permission")
+            }
+        }
+        sharedPreferences.edit {
+            remove(AppPreferenceConstants.PREF_DOWNLOAD_LOCATION)
+        }
+        reduce { state.copy(downloadLocation = "") }
+    }
+
+    fun setAutoplayNextVideoEnabled(enabled: Boolean) = intent {
+        userPreferencesRepository.setAutoplayEnabled(enabled)
+        // UI updates via flow observation in init
+    }
+
+    fun setShuffleOnPlayStartEnabled(enabled: Boolean) = intent {
+        userPreferencesRepository.setShuffleOnPlayStartEnabled(enabled)
+        // UI updates via flow observation in init
     }
 
     @UnstableApi
-    fun clearAllApplicationCaches() {
-        _cacheClearStatus.value = "Clearing caches..."
+    fun clearAllApplicationCaches() = intent {
+        reduce { state.copy(cacheClearStatus = "Clearing caches...") }
         (application as? MyApp)?.clearAllAppCachesOnDemand { success ->
-            viewModelScope.launch {
-                if (success) {
-                    _cacheClearStatus.value = "All caches cleared successfully."
-                    Timber.i("All caches cleared successfully reported by MyApp.")
-                } else {
-                    _cacheClearStatus.value = "Failed to clear all caches."
-                    Timber.e("Cache clearing failed as reported by MyApp.")
-                }
-            }
-        } ?: run {
-            viewModelScope.launch {
-                _cacheClearStatus.value = "Error: Could not access application to clear caches."
-                Timber.e("Application context is not MyApp instance or is null.")
-            }
+            // Call intent directly - it's not a suspend function
+            updateCacheStatus(success)
         }
     }
 
-    fun resetCacheClearStatus() {
-        _cacheClearStatus.value = null
-    }
-
-    private fun loadThemePreference(): String {
-        return sharedPreferences.getString(ThemePreference.KEY, ThemePreference.SYSTEM)
-            ?: ThemePreference.SYSTEM
-    }
-
-    fun setThemePreference(themeValue: String) {
-        if (themeValue !in listOf(
-                ThemePreference.LIGHT,
-                ThemePreference.DARK,
-                ThemePreference.SYSTEM
-            )
-        ) {
-            Timber.w("Invalid theme value set: $themeValue. Defaulting to SYSTEM.")
-            _currentThemePreference.value = ThemePreference.SYSTEM
-            sharedPreferences.edit { putString(ThemePreference.KEY, ThemePreference.SYSTEM) }
-            return
-        }
-        viewModelScope.launch {
-            _currentThemePreference.value = themeValue
-            sharedPreferences.edit {
-                putString(ThemePreference.KEY, themeValue)
-            }
-            Timber.d("Theme preference saved: $themeValue")
+    private fun updateCacheStatus(success: Boolean) = intent {
+        reduce {
+            state.copy(cacheClearStatus = if (success) "Success" else "Failed")
         }
     }
 
-    private fun loadImageQualityPreference(): String {
-        return sharedPreferences.getString(
-            AppPreferenceConstants.PREF_IMAGE_QUALITY,
-            AppPreferenceConstants.IMAGE_QUALITY_AUTO
-        ) ?: AppPreferenceConstants.IMAGE_QUALITY_AUTO
-    }
-
-    fun setImageQualityPreference(quality: String) {
-        viewModelScope.launch {
-            _currentImageQuality.value = quality
-            sharedPreferences.edit { putString(AppPreferenceConstants.PREF_IMAGE_QUALITY, quality) }
-            Timber.d("Image quality preference saved: $quality. App restart may be needed for full effect on existing Coil cache policies.")
-        }
-    }
-
-    private fun loadAudioQualityPreference(): String {
-        return sharedPreferences.getString(
-            AppPreferenceConstants.PREF_AUDIO_QUALITY,
-            AppPreferenceConstants.AUDIO_QUALITY_BEST
-        ) ?: AppPreferenceConstants.AUDIO_QUALITY_BEST
-    }
-
-    fun setAudioQualityPreference(quality: String) {
-        viewModelScope.launch {
-            _currentAudioQuality.value = quality
-            sharedPreferences.edit { putString(AppPreferenceConstants.PREF_AUDIO_QUALITY, quality) }
-            Timber.d("Audio quality preference saved: $quality")
-        }
-    }
-
-    // NEW: Function to set autoplay preference
-    fun setAutoplayNextVideoEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            userPreferencesRepository.setAutoplayEnabled(enabled)
-            Timber.d("Autoplay next video preference set to: $enabled")
-        }
-    }
-    fun setShuffleOnPlayStartEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            userPreferencesRepository.setShuffleOnPlayStartEnabled(enabled)
-        }
-    }
-    private fun loadListLoadingConfigPreference(): String {
-        return sharedPreferences.getString(
-            AppPreferenceConstants.PREF_LIST_LOADING_CONFIG,
-            AppPreferenceConstants.LIST_LOADING_NORMAL
-        ) ?: AppPreferenceConstants.LIST_LOADING_NORMAL
-    }
-
-    fun setListLoadingConfigPreference(config: String) {
-        viewModelScope.launch {
-            _currentListLoadingConfig.value = config
-            sharedPreferences.edit {
-                putString(
-                    AppPreferenceConstants.PREF_LIST_LOADING_CONFIG,
-                    config
-                )
-            }
-            Timber.d("List loading config saved: $config. HolodexRepository will need to react or app restart needed.")
-        }
-    }
-
-    private fun loadBufferingStrategyPreference(): String {
-        return sharedPreferences.getString(
-            AppPreferenceConstants.PREF_BUFFERING_STRATEGY,
-            AppPreferenceConstants.BUFFERING_STRATEGY_AGGRESSIVE
-        ) ?: AppPreferenceConstants.BUFFERING_STRATEGY_AGGRESSIVE
-    }
-
-    fun setBufferingStrategyPreference(strategy: String) {
-        viewModelScope.launch {
-            _currentBufferingStrategy.value = strategy
-            sharedPreferences.edit {
-                putString(
-                    AppPreferenceConstants.PREF_BUFFERING_STRATEGY,
-                    strategy
-                )
-            }
-            Timber.d("Buffering strategy saved: $strategy. ExoPlayer will need to be re-created or reconfigured.")
-        }
+    fun resetCacheClearStatus() = intent {
+        reduce { state.copy(cacheClearStatus = null) }
     }
 }

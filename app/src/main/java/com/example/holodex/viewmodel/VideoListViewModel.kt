@@ -23,6 +23,9 @@ import com.example.holodex.viewmodel.state.SongSegmentFilterMode
 import com.example.holodex.viewmodel.state.ViewTypePreset
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
@@ -36,30 +39,25 @@ import javax.inject.Inject
 // --- State Definitions ---
 
 data class VideoListState(
-    // Browse Data
-    val browseItems: List<UnifiedDisplayItem> = emptyList(),
+    val browseItems: ImmutableList<UnifiedDisplayItem> = persistentListOf(),
     val browseIsLoadingInitial: Boolean = false,
     val browseIsLoadingMore: Boolean = false,
     val browseIsRefreshing: Boolean = false,
     val browseEndOfList: Boolean = false,
     val browseCurrentOffset: Int = 0,
 
-    // Search Data
-    val searchItems: List<UnifiedDisplayItem> = emptyList(),
+    val searchItems: ImmutableList<UnifiedDisplayItem> = persistentListOf(),
     val searchIsLoadingInitial: Boolean = false,
     val searchIsLoadingMore: Boolean = false,
     val searchEndOfList: Boolean = false,
     val searchCurrentOffset: Int = 0,
 
-    // UI Context & Configuration
     val activeContextType: MusicCategoryType = MusicCategoryType.LATEST,
     val isSearchActive: Boolean = false,
     val currentSearchQuery: String = "",
     val activeSearchSource: String = "Holodex",
-    val browseFilterState: BrowseFilterState, // Initialized in VM
+    val browseFilterState: BrowseFilterState,
     val selectedOrganization: String = "Nijisanji",
-
-    // External Data
     val availableOrganizations: List<Pair<String, String?>> = emptyList(),
     val searchHistory: List<String> = emptyList()
 )
@@ -196,9 +194,9 @@ class VideoListViewModel @Inject constructor(
                 }
 
                 state.copy(
-                    browseItems = currentList + newItemsUnique,
+                    browseItems = (currentList + newItemsUnique).toImmutableList(),
                     browseCurrentOffset = offset + rawItems.size,
-                    browseEndOfList = rawItems.isEmpty() || rawItems.size < PAGE_SIZE, // Simple end check
+                    browseEndOfList = rawItems.isEmpty() || rawItems.size < PAGE_SIZE,
                     browseIsLoadingInitial = false, browseIsLoadingMore = false, browseIsRefreshing = false
                 )
             }
@@ -243,9 +241,9 @@ class VideoListViewModel @Inject constructor(
             reduce {
                 val currentList = if (isInitial || isRefresh) emptyList() else state.searchItems
                 state.copy(
-                    searchItems = currentList + unifiedItems,
+                    searchItems = (currentList + unifiedItems).toImmutableList(),
                     searchCurrentOffset = offset + rawItems.size,
-                    searchEndOfList = rawItems.isEmpty(), // Search API often doesn't support pagination well, simplistic check
+                    searchEndOfList = rawItems.isEmpty(),
                     searchIsLoadingInitial = false, searchIsLoadingMore = false
                 )
             }

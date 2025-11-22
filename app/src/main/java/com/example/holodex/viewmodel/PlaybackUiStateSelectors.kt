@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/viewmodel/PlaybackUiStateSelectors.kt
 package com.example.holodex.viewmodel
 
 import androidx.compose.runtime.Composable
@@ -14,6 +13,7 @@ import com.example.holodex.playback.domain.model.DomainShuffleMode
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.util.getHighResArtworkUrl
 import kotlinx.coroutines.flow.StateFlow
+import org.orbitmvi.orbit.compose.collectAsState
 
 // --- Selectors for MiniPlayer ---
 
@@ -23,7 +23,9 @@ fun rememberMiniPlayerArtworkState(
     settingsViewModel: SettingsViewModel = hiltViewModel()
 ): State<String?> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
-    val imageQuality by settingsViewModel.currentImageQuality.collectAsStateWithLifecycle()
+    // FIX: Collect Orbit state
+    val settingsState by settingsViewModel.collectAsState()
+    val imageQuality = settingsState.currentImageQuality
 
     return remember(uiState.currentItem?.artworkUri, imageQuality) {
         mutableStateOf(
@@ -36,34 +38,28 @@ fun rememberMiniPlayerArtworkState(
     }
 }
 
+// ... (rememberMiniPlayerTitleState, rememberMiniPlayerArtistState, rememberIsPlayingState, rememberMiniPlayerProgressState, rememberMiniPlayerQueueStateForButton REMAIN UNCHANGED)
+
 @Composable
-fun rememberMiniPlayerTitleState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<String?> {
+fun rememberMiniPlayerTitleState(uiStateFlow: StateFlow<PlaybackUiState>): State<String?> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.currentItem?.id) { mutableStateOf(uiState.currentItem?.title) }
 }
 
 @Composable
-fun rememberMiniPlayerArtistState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<String?> {
+fun rememberMiniPlayerArtistState(uiStateFlow: StateFlow<PlaybackUiState>): State<String?> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.currentItem?.id) { mutableStateOf(uiState.currentItem?.artistText) }
 }
 
 @Composable
-fun rememberIsPlayingState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<Boolean> {
+fun rememberIsPlayingState(uiStateFlow: StateFlow<PlaybackUiState>): State<Boolean> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.isPlaying) { mutableStateOf(uiState.isPlaying) }
 }
 
 @Composable
-fun rememberMiniPlayerProgressState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<Float> {
+fun rememberMiniPlayerProgressState(uiStateFlow: StateFlow<PlaybackUiState>): State<Float> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.progress, uiState.currentItem?.id) {
         val progressFraction = if (uiState.currentItem != null && uiState.progress.durationSec > 0) {
@@ -76,9 +72,7 @@ fun rememberMiniPlayerProgressState(
 }
 
 @Composable
-fun rememberMiniPlayerQueueStateForButton(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<Pair<Boolean, Boolean>> {
+fun rememberMiniPlayerQueueStateForButton(uiStateFlow: StateFlow<PlaybackUiState>): State<Pair<Boolean, Boolean>> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.queue, uiState.currentItem, uiState.currentIndexInQueue, uiState.repeatMode) {
         val hasItemAndQueue = uiState.queue.isNotEmpty() && uiState.currentItem != null
@@ -88,7 +82,6 @@ fun rememberMiniPlayerQueueStateForButton(
     }
 }
 
-
 // --- Selectors for FullPlayerScreen ---
 
 @Composable
@@ -97,7 +90,9 @@ fun rememberFullPlayerArtworkState(
     settingsViewModel: SettingsViewModel = hiltViewModel()
 ): State<String?> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
-    val imageQuality by settingsViewModel.currentImageQuality.collectAsStateWithLifecycle()
+    // FIX: Collect Orbit state
+    val settingsState by settingsViewModel.collectAsState()
+    val imageQuality = settingsState.currentImageQuality
 
     return remember(uiState.currentItem?.artworkUri, imageQuality) {
         mutableStateOf(
@@ -110,26 +105,22 @@ fun rememberFullPlayerArtworkState(
     }
 }
 
+// ... (rememberFullPlayerCurrentItemState, etc. REMAIN UNCHANGED)
+
 @Composable
-fun rememberFullPlayerCurrentItemState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<PlaybackItem?> {
+fun rememberFullPlayerCurrentItemState(uiStateFlow: StateFlow<PlaybackUiState>): State<PlaybackItem?> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.currentItem) { mutableStateOf(uiState.currentItem) }
 }
 
 @Composable
-fun rememberFullPlayerProgressState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<DomainPlaybackProgress> {
+fun rememberFullPlayerProgressState(uiStateFlow: StateFlow<PlaybackUiState>): State<DomainPlaybackProgress> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.progress) { mutableStateOf(uiState.progress) }
 }
 
 @Composable
-fun rememberFullPlayerQueueInfoState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<Triple<List<PlaybackItem>, Int, Boolean>> {
+fun rememberFullPlayerQueueInfoState(uiStateFlow: StateFlow<PlaybackUiState>): State<Triple<List<PlaybackItem>, Int, Boolean>> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.queue, uiState.currentIndexInQueue) {
         mutableStateOf(Triple(uiState.queue, uiState.currentIndexInQueue, uiState.queue.isNotEmpty()))
@@ -137,16 +128,13 @@ fun rememberFullPlayerQueueInfoState(
 }
 
 @Composable
-fun rememberFullPlayerLoadingState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<Boolean> {
+fun rememberFullPlayerLoadingState(uiStateFlow: StateFlow<PlaybackUiState>): State<Boolean> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.isLoading) { mutableStateOf(uiState.isLoading) }
 }
+
 @Composable
-fun rememberFullPlayerControlModesState(
-    uiStateFlow: StateFlow<PlaybackUiState>
-): State<Pair<DomainRepeatMode, DomainShuffleMode>> {
+fun rememberFullPlayerControlModesState(uiStateFlow: StateFlow<PlaybackUiState>): State<Pair<DomainRepeatMode, DomainShuffleMode>> {
     val uiState by uiStateFlow.collectAsStateWithLifecycle()
     return remember(uiState.repeatMode, uiState.shuffleMode) {
         mutableStateOf(uiState.repeatMode to uiState.shuffleMode)

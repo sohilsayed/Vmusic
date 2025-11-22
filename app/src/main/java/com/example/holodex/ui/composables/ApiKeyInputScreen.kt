@@ -26,10 +26,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.holodex.R
 import com.example.holodex.viewmodel.ApiKeySaveResult
 import com.example.holodex.viewmodel.SettingsViewModel
+import org.orbitmvi.orbit.compose.collectAsState // <--- Import
 
 @Composable
 fun ApiKeyInputScreen(
@@ -37,12 +37,17 @@ fun ApiKeyInputScreen(
     onApiKeySavedSuccessfully: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val currentApiKey by settingsViewModel.currentApiKey.collectAsStateWithLifecycle()
-    var apiKeyInputText by remember(currentApiKey) { mutableStateOf(currentApiKey) } // Initialize with current key
+    // FIX: Collect state first
+    val state by settingsViewModel.collectAsState()
+
+    // FIX: Access properties from state
+    val currentApiKey = state.currentApiKey
+    val apiKeySaveResult = state.apiKeySaveResult
+
+    var apiKeyInputText by remember(currentApiKey) { mutableStateOf(currentApiKey) }
 
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
-    val apiKeySaveResult by settingsViewModel.apiKeySaveResult.collectAsStateWithLifecycle()
 
     LaunchedEffect(apiKeySaveResult) {
         when (val result = apiKeySaveResult) {
@@ -64,7 +69,7 @@ fun ApiKeyInputScreen(
     }
 
     Column(
-        modifier = modifier.padding(bottom = 8.dp), // Add some bottom padding
+        modifier = modifier.padding(bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         OutlinedTextField(

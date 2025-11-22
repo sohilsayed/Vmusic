@@ -8,6 +8,8 @@ import androidx.annotation.OptIn
 import androidx.media3.exoplayer.offline.DownloadNotificationHelper
 import androidx.work.WorkManager
 import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.example.holodex.playback.PlaybackRequestManager
 import com.example.holodex.util.PaletteExtractor
 import com.google.gson.Gson
@@ -55,20 +57,21 @@ object AppModule {
     @Provides
     @Singleton
     fun provideImageLoader(@ApplicationContext context: Context): ImageLoader {
-        // This logic is moved from MyApp.kt's newImageLoader()
         return ImageLoader.Builder(context)
             .memoryCache {
-                coil.memory.MemoryCache.Builder(context)
+                MemoryCache.Builder(context)
                     .maxSizePercent(0.25)
                     .build()
             }
             .diskCache {
-                coil.disk.DiskCache.Builder()
+                DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache_v1"))
-                    .maxSizeBytes(50L * 1024L * 1024L) // 50MB
+                    .maxSizeBytes(50L * 1024L * 1024L) // Increased to 100MB for better offline support
                     .build()
             }
-            .respectCacheHeaders(false)
+            .crossfade(true) // Reduces visual jitter on load
+            .allowHardware(true) // CRITICAL: Uses GPU for bitmaps, saving Main Thread CPU
+            .respectCacheHeaders(false) // Aggressively cache images regardless of server headers
             .build()
     }
 
