@@ -1,0 +1,406 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Existing strings -->
+    <string name="app_name">Holodex Music</string>
+    <string name="unknown_title">Unknown Title</string>
+    <string name="unknown_artist">Unknown Artist</string>
+    <string name="unknown_album">Unknown Album</string>
+    <string name="loading">Loading…</string>
+
+    <!-- API Key related -->
+    <string name="hint_api_key">Enter Holodex API Key</string>
+    <string name="button_save_key">Save Key</string>
+    <string name="toast_api_key_saved">API Key saved!</string>
+    <string name="toast_api_key_empty">API Key cannot be empty.</string>
+    <string name="toast_api_key_required">Please save an API Key first.</string>
+    <string name="status_api_key_required_fetch">Please enter and save your Holodex API Key to fetch videos.</string>
+
+    <!-- Fetching & Data States -->
+    <string name="button_fetch_music">Fetch by Category</string>
+    <string name="button_load_more">Load More</string>
+    <string name="status_no_videos_found_filter">No videos found for this filter.</string>
+    <string name="status_select_category_first">Select a category first</string>
+    <string name="status_select_category_load_more">Fetch a category first to load more</string>
+    <string name="toast_fetching_songs_for">Fetching songs for: %s</string>
+    <string name="toast_playing_segment">Preparing to play segment: %s</string>
+    <string name="toast_playing_selected_segment">Preparing selected: %s</string>
+    <string name="toast_no_segments_playing_full">No segments. Preparing full audio for: %s</string>
+    <string name="toast_stream_url_ready">Audio stream URL obtained! Ready for playback.</string>
+
+    <!-- Organization Spinner Prompt (Optional) -->
+    <string name="spinner_prompt_organization">Select Organization</string>
+    <string name="unknown_channel">Unknown Channel</string>
+    <string name="notification_no_media_title">No media playing</string>
+    <!-- Song List Dialog -->
+    <string name="toast_playing_segment_from_stream">Playing stream segment: %s</string>
+    <string name="unknown_song_title">Unknown Song Title</string>
+    <string name="song_timestamp_format">%1$s - %2$s</string>
+    <string name="timestamp_not_available">N/A</string>
+    <string name="dialog_title_select_song">Select Song</string>
+    <string name="button_play_full_stream">Play Full Stream</string>
+    <string name="cancel">Cancel</string>
+    <string name="unknown_song_title_short">Untitled Song</string>
+    <string name="song_count_format" translatable="false">%d songs</string>
+    <string name="more_options">More options</string>
+    <!-- Search Feature -->
+    <string name="hint_search_videos">Search music videos (e.g., song title, artist)</string>
+    <string name="button_search">Search</string>
+    <string name="status_enter_search_term">Please enter a search term.</string>
+    <string name="content_desc_channel_thumbnail">Channel Thumbnail</string>
+    <!-- Playback Notification / Media Session related -->
+    <string name="playback_notification_channel_name">Music Playback</string>
+    <string name="playback_notification_channel_description">Controls for music currently playing.</string>
+    <!-- Potential error messages or states -->
+    <string name="error_stream_resolution_failed">Could not load stream.</string>
+    <string name="error_playback_failed">Playback error occurred.</string>
+    <string name="error_player_service_not_ready">Player service not ready. Please try again.</string>
+    <string name="error_playback_command_failed">Playback command failed (code: %d).</string>
+    <string name="error_initiating_playback">Error initiating playback.</string>
+    <!-- For MediaItem default descriptions or titles if primary ones are missing -->
+    <string name="default_media_item_title">Untitled Track</string>
+    <string name="default_media_item_artist">Unknown Artist</string>
+    <string name="action_previous">Previous</string>
+    <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_next">Next</string>
+    <string name="action_like">Like</string>
+
+    <string name="action_back">Back</string>
+    <string name="nothing_selected_to_play">Nothing selected to play.</string>
+    <string name="action_shuffle">Shuffle</string>
+    <string name="action_repeat">Repeat</string>
+    <string name="action_view_queue">View Queue</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_api_key">API Key</string>
+    <string name="settings_section_cache">Cache Management</string>
+    <string name="settings_button_clear_cache">Clear All Application Cache</string>
+    <string name="settings_desc_clear_cache">This will remove all downloaded media, cached API data, and image thumbnails. Playback history will be kept.</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_app_version">App Version: %s</string>
+    <string name="control_panel_search_videos">Search Videos</string>
+    <string name="control_panel_browse_category">Browse by Category</string>
+
+    <string name="status_api_key_required_main">API Key is required to use the app. Please set it in Settings.</string>
+    <string name="button_go_to_settings">Go to Settings</string>
+    <string name="status_no_videos_for_category">No videos found for the selected category.</string>
+    <string name="category_favorites">Favorites</string>
+    <string name="action_unlike">Unlike</string>
+
+    <string name="action_clear_search">Clear search text</string>
+    <string name="search_history_title">Recent Searches</string>
+    <string name="action_clear_history">Clear History</string>
+    <string name="content_desc_search_history_item">Search history item</string>
+
+    <string name="settings_label_version">Version</string>
+    <string name="settings_label_powered_by">Powered By / Acknowledgements</string>
+    <string name="settings_link_holodex">Holodex.net</string>
+    <string name="settings_link_newpipe">NewPipeExtractor</string>
+    <string name="settings_section_theme">Appearance</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_system">Follow System</string>
+    <string name="content_desc_external_link">Open external link</string>
+
+    <string name="dialog_title_create_playlist">Create New Playlist</string>
+    <string name="hint_playlist_name">Playlist Name</string>
+    <string name="hint_playlist_description_optional">Description (Optional)</string>
+    <string name="create">Create</string>
+
+    <string name="dialog_title_add_to_playlist">Add to playlist</string>
+    <string name="action_create_new_playlist_dialog">Create new playlist…</string>
+    <string name="action_more_options">More options</string>
+    <string name="action_add_to_playlist_menu">Add to playlist</string>
+    <string name="apply_filters_button">Apply Filters</string>
+    <string name="screen_title_playlist_details">Playlist Details</string>
+    <string name="message_playlist_is_empty">This playlist is empty.</string>
+    <string name="action_play_item">Play item</string>
+    <string name="action_remove_from_playlist">Remove from playlist</string>
+    <plurals name="item_count">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+    <string name="action_play_all">Play All</string>
+    <string name="action_play_all_playlist">Play all items in playlist</string>
+    <string name="message_no_favorited_videos">You haven\'t favorited any videos yet.</string>
+    <string name="message_no_liked_segments">You haven\'t liked any song segments yet.</string>
+    <string name="action_play_all_liked_segments">Play All Liked Segments</string>
+    <string name="screen_title_playlists">My Playlists</string>
+    <string name="action_create_playlist">Create Playlist</string>
+    <string name="message_no_playlists_yet">No playlists yet. Tap the \'+\' button to create one!</string>
+    <string name="action_delete_playlist">Delete playlist</string>
+    <string name="category_display_name_search_results">Search: %s</string>
+    <string name="search_prompt_start">Search for music!</string>
+    <string name="playlist_title_liked_segments">Liked Segments</string>
+    <string name="playlist_desc_liked_segments">All your liked song segments</string>
+    <string name="message_no_liked_segments_in_playlist_view">You haven\'t liked any song segments yet. Like segments from videos to see them here!</string>
+    <string name="search_your_music_hint">Search your music</string>
+    <string name="action_menu">Menu</string>
+    <string name="action_filter_sort">Filter or Sort</string>
+    <string name="bottom_nav_browse">Browse</string>
+    <string name="bottom_nav_favorites">Favorites</string>
+    <string name="bottom_nav_playlists">Playlists</string>
+    <string name="bottom_nav_settings">Settings</string>
+    <string name="screen_title_favorites">My Favorites</string>
+    <string name="category_liked_segments">Liked Segments</string>
+    <string name="bottom_nav_search">Search</string>
+    <string name="screen_title_search">Search Music</string>
+    <string name="status_no_videos_for_filter">No videos found for the current filters.</string>
+
+    <!-- For FullPlayerScreen -->
+    <string name="content_desc_volume">Volume control</string>
+    <string name="action_hide_lyrics">Hide lyrics</string>
+    <string name="action_show_lyrics">Show lyrics</string>
+    <string name="action_show_player">Show player</string>
+    <string name="action_audio_settings">Audio settings</string>
+    <string name="action_view_artist">View artist</string>
+    <string name="action_view_album">View album</string>
+
+    <!-- General Player Strings -->
+    <string name="content_desc_album_art">Album artwork</string>
+    <string name="loading_track">Loading track…</string>
+    <string name="now_playing">Now Playing</string>
+    <string name="up_next_queue_title">Up Next</string>
+    <string name="empty_queue">Queue is empty</string>
+    <string name="action_clear_queue">Clear Queue</string>
+    <string name="action_remove_from_queue">Remove from queue</string>
+    <string name="currently_playing_indicator">Currently Playing</string>
+    <string name="action_move_up">Move up</string>
+    <string name="action_move_down">Move down</string>
+    <string name="content_desc_navigate_back">Navigate back</string>
+    <string name="content_desc_like_button">Like button</string>
+    <string name="content_desc_unlike_button">Unlike button</string>
+    <string name="content_desc_view_queue">View queue</string>
+    <string name="content_desc_more_options">More options</string>
+    <string name="content_desc_lyrics_toggle">Toggle lyrics</string>
+    <string name="content_desc_shuffle_button">Shuffle button</string>
+    <string name="content_desc_skip_previous_button">Skip to previous</string>
+    <string name="content_desc_play_pause_button">Play or Pause</string>
+    <string name="content_desc_skip_next_button">Skip to next</string>
+    <string name="content_desc_repeat_button">Repeat mode</string>
+    <string name="lyrics_not_available">Lyrics not available for this track.</string> <!-- ADDED -->
+    <!-- For MainBrowseScreen & SearchScreen -->
+    <string name="status_search_no_results">No results found for \'%s\'.</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_retry">Retry</string>
+    <string name="unknown_error_occurred">An unknown error occurred</string>
+    <string name="message_youve_reached_the_end">You\'ve reached the end!</string>
+    <string name="action_search">Search</string>
+    <string name="scroll_to_top">Scroll to top</string>
+    <string name="loading_content_message">Loading content…</string>
+    <string name="status_no_videos_for_filter_try_refresh">No music found for these filters. Try refreshing.</string>
+    <string name="error_loading_generic">Could not load content: %s</string>
+    <string name="error_search_failed">Search failed: %s</string>
+    <string name="status_no_results_try_refresh">No results for \'%s\'. Try refreshing.</string>
+    <string name="error_playlist_not_found">Playlist not found.</string>
+
+    <string name="settings_section_data_performance">Data and Performance</string>
+    <string name="error_artist_info_unavailable">Artist/Channel information not available.</string>
+    <string name="original_artist_label">(Original Artist)</string>
+    <string name="channel_label">(Channel)</string>
+    <string name="settings_label_image_quality">Image Quality</string>
+    <string name="settings_desc_image_quality">Lower quality reduces data usage and may speed up loading. Changes may require an app restart for cached images.</string>
+    <string name="settings_image_quality_auto">Auto (Recommended)</string>
+    <string name="settings_image_quality_medium">Medium (Faster loading)</string>
+    <string name="settings_image_quality_low">Low (Data saver)</string>
+
+    <string name="settings_label_audio_quality">Audio Quality</string>
+    <string name="settings_desc_audio_quality">Select preferred audio quality for streaming. Lower quality uses less data.</string>
+    <string name="settings_audio_quality_best">Best Available</string>
+    <string name="settings_audio_quality_standard">Standard (~128kbps)</string>
+    <string name="settings_audio_quality_saver">Data Saver (~64kbps)</string>
+    <string name="action_add_to_queue_short">Add to Queue</string>
+    <string name="error_no_equalizer_app_found">No equalizer app found.</string>
+    <string name="error_no_audio_session">Audio session not available.</string>
+    <!-- NEW: Strings for Autoplay feature -->
+    <string name="settings_section_playback">Playback</string>
+    <string name="settings_label_autoplay_next_video">Autoplay next video</string>
+    <string name="settings_desc_autoplay_next_video">Automatically play the next song in the queue when the current one finishes. Does not apply if repeat mode is set to repeat one.</string>
+    <string name="settings_label_data_loading">List Loading Intensity</string>
+    <string name="settings_desc_data_loading">"Normal" preloads more items for smoother scrolling. "Reduced" uses less data by loading fewer items in advance. App restart may be needed."</string>
+    <string name="settings_data_loading_normal">Normal (Smooth scrolling)</string>
+    <string name="settings_data_loading_reduced">Reduced (Less data usage)</string>
+    <string name="settings_label_list_loading_config">List Loading</string>
+    <string name="settings_desc_list_loading_config">"Adjust how aggressively lists load data. 'Reduced' or 'Minimal' uses less data upfront but scrolling might be less smooth. App restart may be needed."</string>
+    <string name="settings_label_shuffle_on_play">Shuffle on Play</string>
+    <string name="settings_desc_shuffle_on_play">Automatically shuffle any new album, playlist, or group of songs when you press play.</string>
+    <string name="login_with_discord">Login with Discord</string>
+    <string name="settings_section_account">Account</string>
+    <string name="action_login">Login with Discord</string>
+    <string name="action_logout">Logout</string>
+    <string name="settings_desc_login">Log in to synchronize your history, likes, and playlists with your Musicdex account.</string>
+    <string name="content_desc_sync_icon">Sync status icon</string>
+
+    <!-- Display names for ListLoadingConfigOptions will be in SettingsScreen.kt enum -->
+
+    <string name="settings_label_buffering_strategy">Playback Buffering</string>
+    <string name="settings_desc_buffering_strategy">"Controls how much audio is buffered before playback starts. 'Stable' may reduce interruptions on slow networks but increases initial wait. App restart may be needed."</string>
+
+    <plurals name="queue_items_count">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+
+    <string name="empty_queue_description">Add songs from the browse or search screens to get started.</string>
+    <string name="drag_to_reorder">Drag to reorder</string>
+    <string name="remove_from_queue">Remove from queue</string>
+
+    <!-- For VideoDetailsScreen -->
+    <string name="video_thumbnail_description">Video thumbnail</string>
+    <string name="no_song_segments_available">No song segments are available for this video.</string>
+
+    <!-- Using plurals for song count for better localization -->
+    <plurals name="song_count">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+    <string name="playlist_title_downloads">Downloads</string>
+    <string name="playlist_desc_downloads">All your downloaded songs</string>
+    <!-- For Toast message -->
+    <string name="added_songs_to_queue">Added %d songs to queue</string>
+    <string name="bottom_nav_home">Home</string>
+    <string name="bottom_nav_library">Library</string>
+    <string name="bottom_nav_downloads">Downloads</string>
+    <string name="message_no_favorites_or_segments">Your favorites and liked segments will appear here.</string>
+    <string name="action_download_all">Download All Segments</string>
+    <string name="search_results_title">Results for: %s</string>
+    <string name="action_clear_all">Clear</string>
+    <string name="settings_label_storage_location">Storage Location</string>
+    <string name="settings_desc_location_default">App-private storage (Default)</string>
+    <string name="settings_desc_location_custom">Custom Location: %s</string>
+    <string name="settings_button_reset_to_default">Reset to Default</string>
+    <string name="settings_label_download_location">Download Location</string>
+    <string name="settings_desc_download_location">Choose a folder for downloaded audio. Defaults to private app storage.</string>
+    <string name="settings_download_location_default">Default (App-private storage)</string>
+    <string name="action_clear_location">Clear custom location</string>
+    <string name="action_download">Download</string>
+    <string name="toast_download_started">Download started!</string>
+    <string name="status_download_failed">Download failed</string>
+
+    <!-- Titles for different download states in the notification -->
+    <plurals name="download_notification_title_in_progress">
+        <item quantity="one">Downloading %d file</item>
+        <item quantity="other">Downloading %d files</item>
+    </plurals>
+    <plurals name="download_notification_title_failed">
+        <item quantity="one">%d download failed</item>
+        <item quantity="other">%d downloads failed</item>
+    </plurals>
+    <string name="download_notification_title_completed">All downloads complete</string>
+    <string name="download_notification_text_failed">Could not download content. Tap to see details.</string>
+
+
+    <!-- Download Notification Channel details -->
+    <string name="download_notification_channel_name">Holodex Downloads</string>
+    <string name="download_notification_channel_description">Notifications for Holodex song downloads</string>
+
+    <!-- Download Notification messages -->
+    <string name="download_notification_no_active_downloads">No active downloads</string>
+    <string name="download_notification_paused_reason">Downloads paused: %1$s</string>
+    <string name="download_notification_downloading_items_progress">Downloading %1$d items (%2$d%%)</string>
+    <string name="download_notification_processing_downloads">Processing downloads</string>
+
+    <!-- Download Requirement messages -->
+    <string name="download_requirement_network_connection">Network connection</string>
+    <string name="download_requirement_wifi_connection">Wi-Fi connection</string>
+    <string name="download_requirement_device_charging">Device charging</string>
+    <string name="download_requirement_battery_not_low">Battery not low</string>
+    <!-- Download Screen Strings -->
+    <string name="action_view_as_list">View as List</string>
+    <string name="action_view_as_grid">View as Grid</string>
+    <string name="search_your_downloads_hint">Search your downloads…</string>
+    <string name="action_cancel_download">Cancel download</string>
+    <string name="action_resume_download">Resume download</string>
+    <string name="action_retry_download">Retry download</string>
+    <string name="action_delete">Delete</string>
+    <string name="message_no_search_results_downloads">No downloads match your search</string>
+    <string name="message_no_downloads">No downloads yet\n\nStart downloading songs to see them here</string>
+
+    <!-- Download Status Strings -->
+    <string name="status_queued">Queued</string>
+    <string name="status_downloading">Downloading</string>
+    <string name="status_paused">Paused</string>
+    <string name="status_completed">Completed</string>
+    <string name="status_failed">Failed</string>
+    <string name="status_deleting">Deleting…</string>
+
+
+
+    <!-- Additional Action Strings -->
+    <string name="action_clear">Clear</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_cancel">Cancel</string>
+
+    <!-- Progress and Status Messages -->
+    <string name="download_progress_percent">%1$d%%</string>
+    <string name="download_speed_format">%1$s/s</string>
+    <string name="download_eta_format">%1$s remaining</string>
+
+
+    <!-- Error Messages -->
+    <string name="error_download_failed">Download failed</string>
+    <string name="error_download_cancelled">Download cancelled</string>
+    <string name="error_network_unavailable">Network unavailable</string>
+    <string name="error_storage_full">Storage full</string>
+
+    <!-- Accessibility Strings -->
+    <string name="content_description_download_artwork">Artwork for %1$s</string>
+    <string name="content_description_download_progress">Download progress: %1$d percent</string>
+    <string name="content_description_download_status">Download status: %1$s</string>
+
+    <string name="screen_title_history">History</string>
+    <string name="message_no_history">Your listening history is empty.\n\nPlayed songs will appear here.</string>
+    <string name="recently_played_songs">Recently Played Songs</string>
+    <string name="action_playAll">Play All</string>
+    <string name="action_add_to_queue">Add to Queue</string>
+    <plurals name="song_count_label">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+    <string name="category_favorite_channels">Favorite Channels</string>
+
+    <string name="bottom_nav_discover">Discover</string>
+    <string name="action_show_more">Show More</string>
+    <string name="shelf_title_for_you">For You</string>
+    <string name="shelf_title_trending_songs">Trending Now</string>
+    <string name="shelf_title_recent_streams">Recent Live Performances</string>
+    <string name="shelf_title_fan_playlists">Community Mixes</string>
+    <string name="shelf_title_artist_radios">Artist Radios</string>
+    <string name="shelf_title_daily_mixes">Daily Mixes</string>
+    <string name="screen_title_more_results">More Results</string>
+    <string name="shelf_title_recent_streams_favorites">Recent streams from your favorites</string>
+    <string name="content_desc_album_art_for">Album artwork for %1$s</string>
+
+    <string name="song_is_already_correctly_downloaded">\'%1$s\' is already correctly downloaded.</string>
+    <string name="metadata_incorrect_reprocessing">Metadata incorrect, re-processing \'%1$s\'…</string>
+    <string name="already_in_download_queue">\'%1$s\' is already in the download queue.</string>
+    <string name="retrying_export_for">Retrying export for \'%1$s\'…</string>
+    <string name="starting_download_for">Starting download for \'%1$s\'…</string>
+    <string name="verifying_songs_for_download">Verifying %1$d songs for download/repair…</string>
+
+
+    <string name="sgp_artist_radio_title">%1$s Radio</string>
+    <string name="sgp_artist_radio_desc">Radio featuring %1$s</string>
+    <string name="sgp_daily_mix_title">Daily Mix: %1$s</string>
+    <string name="sgp_daily_mix_desc">Your daily dose of %1$s</string>
+    <string name="sgp_mv_random_title">Best of %1$s</string>
+    <string name="sgp_mv_latest_title">Recent %1$s Covers &amp; Originals</string>
+    <string name="sgp_mv_random_desc">Relive the top hits from %1$s</string>
+    <string name="sgp_mv_latest_desc">Latest released covers &amp; originals from %1$s</string>
+    <string name="sgp_latest_title">Catch up on %1$s</string>
+    <string name="sgp_latest_desc">Latest tagged songs in %1$s</string>
+    <string name="sgp_weekly_mix_title">%1$s Weekly Mix</string>
+    <string name="sgp_weekly_mix_desc">Explore this week in %1$s</string>
+    <string name="sgp_my_weekly_mix_title">My Weekly Mix</string>
+    <string name="sgp_my_weekly_mix_desc">Crafted for you based on your listening habits</string>
+    <string name="sgp_history_title">Recently Played</string>
+    <string name="sgp_history_desc">Your recently played songs</string>
+    <string name="sgp_hot_title">Trending Songs</string>
+    <string name="sgp_hot_desc">Trending songs radio</string>
+    <string name="sgp_video_desc">Sang by %1$s</string>
+    <string name="sgp_daily_mix_type">Daily Mix</string>
+    <string name="sgp_weekly_mix_type">Weekly Mix</string>
+    <string name="sgp_radio_type">Radio</string>
+    <string name="action_share">Share</string>
+    <string name="action_view_video">Go to Video</string>
+</resources>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Basic semantic colors, often overridden by themes -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Primary colors for XML themes (e.g., for Splash Screen or pre-Compose UI) -->
+    <!-- These should ideally match or be inspired by your md_theme_light_primary -->
+    <!-- from your Compose Color.kt for consistency if used by system UI elements -->
+    <!-- before Compose takes over. -->
+    <color name="seed">#6750A4</color> <!-- Your md_theme_light_primary -->
+
+    <!-- Example: Colors matching your light theme (from your Color.kt) -->
+    <!-- These can be used for things like windowSplashScreenBackground -->
+    <color name="primary_light">#6750A4</color>
+    <color name="on_primary_light">#FFFFFF</color>
+    <color name="primary_container_light">#EADDFF</color>
+    <color name="on_primary_container_light">#21005D</color>
+    <color name="surface_light">#FFFBFE</color> <!-- Good for general backgrounds -->
+    <color name="background_light">#FFFBFE</color>
+
+    <!-- You might not need specific dark theme colors here if your -->
+    <!-- DayNight theme handles it and Compose uses its own darkColorScheme. -->
+    <!-- However, if you need to reference them from XML for some reason: -->
+    <color name="primary_dark">#D0BCFF</color>
+    <color name="on_primary_dark">#381E72</color>
+    <color name="surface_dark">#1C1B1F</color> <!-- Good for general backgrounds in dark theme -->
+    <color name="background_dark">#1C1B1F</color>
+
+</resources>

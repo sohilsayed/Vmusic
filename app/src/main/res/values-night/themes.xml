@@ -1,0 +1,8 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Base.Theme.Holodex" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Parent should be the same, DayNight handles the switch -->
+        <!-- ... your dark theme specific attributes if any, usually handled by Compose ... -->
+    </style>
+    <!-- No need to redefine Theme.Holodex here if it just inherits Base.Theme.Holodex -->
+    <!-- If you had a Theme.App.Starting for night, it would go here too -->
+</resources>

@@ -1,0 +1,25 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Try this parent name -->
+    <style name="Base.Theme.Holodex" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- OR, if the above doesn't work, try the direct Material Components one (less likely to be the issue if the library is present) -->
+        <!-- <style name="Base.Theme.Holodex" parent="Theme.MaterialComponents.DayNight.NoActionBar"> -->
+        <!-- Note: Theme.Material3.DayNight.NoActionBar IS the correct one for M3 -->
+
+        <!-- Your items -->
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:fitsSystemWindows">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="p">shortEdges</item>
+    </style>
+
+    <style name="Theme.Holodex" parent="Base.Theme.Holodex" />
+
+    <!-- SplashScreen theme -->
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/primary_container_light</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Holodex</item>
+    </style>
+</resources>
