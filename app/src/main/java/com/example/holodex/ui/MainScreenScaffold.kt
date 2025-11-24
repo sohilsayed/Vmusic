@@ -6,8 +6,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -120,6 +120,8 @@ fun MainScreenScaffold(
     HolodexMusicTheme(settingsViewModel = settingsViewModel) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            // FIX 1: Set insets to 0 to let content draw behind system bars
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
                 Log.d(TAG, "bottomBar: Composing")
                 Column {
@@ -165,7 +167,10 @@ fun MainScreenScaffold(
                 }
             }
         ) { innerPadding ->
-            Box(modifier = Modifier.padding(innerPadding)) {
+            // FIX 2: Do NOT apply innerPadding to the Box.
+            // This allows the background of the screens (HolodexNavHost) to fill the entire screen.
+            // The internal screens (Library, etc.) handle their own content padding for lists.
+            Box(modifier = Modifier.fillMaxSize()) {
                 HolodexNavHost(
                     navController = navController,
                     videoListViewModel = videoListViewModel,
