@@ -148,6 +148,8 @@ class HolodexRepository @Inject constructor(
         _availableOrganizations.asStateFlow()
 
     init {
+
+
         // Fetch the dynamic organization list as soon as the repository is created.
         applicationScope.launch {
             fetchOrganizationList()
