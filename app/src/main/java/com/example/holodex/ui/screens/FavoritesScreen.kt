@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/ui/screens/FavoritesScreen.kt
 package com.example.holodex.ui.screens
 
 import android.widget.Toast
@@ -52,8 +51,6 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.holodex.R
-import com.example.holodex.data.db.ExternalChannelEntity
-import com.example.holodex.data.db.FavoriteChannelEntity
 import com.example.holodex.ui.composables.LoadingSkeleton
 import com.example.holodex.ui.composables.UnifiedListItem
 import com.example.holodex.ui.navigation.AppDestinations
@@ -74,13 +71,12 @@ fun FavoritesScreen(
     videoListViewModel: VideoListViewModel,
     playlistManagementViewModel: PlaylistManagementViewModel,
     navController: NavController,
-    favoritesViewModel: FavoritesViewModel = hiltViewModel()
+    favoritesViewModel: FavoritesViewModel = hiltViewModel(),
+    contentPadding: PaddingValues = PaddingValues(0.dp) // NEW PARAMETER
 ) {
-    // *** THE FIX: Collect the single state object from the Orbit container ***
     val state by favoritesViewModel.collectAsState()
     val context = LocalContext.current
 
-    // Handle one-time side effects like toasts
     favoritesViewModel.collectSideEffect { sideEffect ->
         when (sideEffect) {
             is FavoritesSideEffect.ShowToast -> {
@@ -93,13 +89,16 @@ fun FavoritesScreen(
     var isFavoritesExpanded by remember { mutableStateOf(true) }
     var isSegmentsExpanded by remember { mutableStateOf(true) }
 
-    // Use the isLoading flag from the state
     if (state.isLoading) {
         LoadingSkeleton(itemCount = 8, modifier = modifier.padding(16.dp))
         return
     }
 
-    LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        // *** FIX: Use the dynamic content padding ***
+        contentPadding = contentPadding
+    ) {
         if (state.favoriteChannels.isNotEmpty()) {
             item {
                 ExpandableSectionHeader(
@@ -113,17 +112,8 @@ fun FavoritesScreen(
                 item {
                     FavoriteChannelsRow(
                         channels = state.favoriteChannels,
-                        onChannelClick = { channel ->
-                            val (id, isExternal) = when (channel) {
-                                is FavoriteChannelEntity -> channel.id to false
-                                is ExternalChannelEntity -> channel.channelId to true
-                                else -> null to false
-                            }
-                            if (id != null) {
-                                val route =
-                                    if (isExternal) "external_channel_details/$id" else "channel_details/$id"
-                                navController.navigate(route)
-                            }
+                        onChannelClick = { channelItem ->
+                            navController.navigate("channel_details/${channelItem.channelId}")
                         }
                     )
                 }
@@ -146,11 +136,7 @@ fun FavoritesScreen(
                     FavoritesGrid(
                         items = state.unifiedFavoritedVideos,
                         onItemClicked = { item ->
-                            navController.navigate(
-                                AppDestinations.videoDetailRoute(
-                                    item.videoId
-                                )
-                            )
+                            navController.navigate(AppDestinations.videoDetailRoute(item.videoId))
                         }
                     )
                 }
@@ -159,11 +145,7 @@ fun FavoritesScreen(
                     UnifiedListItem(
                         item = item,
                         onItemClicked = {
-                            navController.navigate(
-                                AppDestinations.videoDetailRoute(
-                                    item.videoId
-                                )
-                            )
+                            navController.navigate(AppDestinations.videoDetailRoute(item.videoId))
                         },
                         videoListViewModel = videoListViewModel,
                         favoritesViewModel = favoritesViewModel,
@@ -174,9 +156,8 @@ fun FavoritesScreen(
             }
         }
 
-        item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
-
         item {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             ExpandableSectionHeader(
                 title = stringResource(R.string.category_liked_segments),
                 itemCount = state.unifiedLikedSegments.size,
@@ -191,9 +172,7 @@ fun FavoritesScreen(
                     FavoritesGrid(
                         items = state.unifiedLikedSegments,
                         onItemClicked = { item ->
-                            videoListViewModel.playFavoriteOrLikedSegmentItem(
-                                item.toPlaybackItem()
-                            )
+                            videoListViewModel.playFavoriteOrLikedSegmentItem(item.toPlaybackItem())
                         }
                     )
                 }
@@ -212,8 +191,6 @@ fun FavoritesScreen(
         }
     }
 }
-
-// Rest of the file (helper composables) remains the same
 
 @Composable
 private fun UnifiedGridItem(
@@ -265,7 +242,7 @@ private fun FavoritesGrid(
         contentPadding = PaddingValues(16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.heightIn(min = 1.dp), // Prevents crash on empty list
+        modifier = Modifier.heightIn(min = 1.dp),
         userScrollEnabled = false
     ) {
         items(items, key = { it.stableId }) { item ->
@@ -306,31 +283,29 @@ private fun ExpandableSectionHeader(
 }
 
 @Composable
-private fun FavoriteChannelsRow(channels: List<Any>, onChannelClick: (Any) -> Unit) {
+private fun FavoriteChannelsRow(
+    channels: List<UnifiedDisplayItem>,
+    onChannelClick: (UnifiedDisplayItem) -> Unit
+) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        items(channels) { channel ->
-            val (photoUrl, name, id) = when (channel) {
-                is FavoriteChannelEntity -> Triple(channel.photoUrl, channel.name, channel.id)
-                is ExternalChannelEntity -> Triple(
-                    channel.photoUrl,
-                    channel.name,
-                    channel.channelId
-                )
-
-                else -> Triple(null, "Unknown", null)
-            }
+        items(channels, key = { it.stableId }) { channelItem ->
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .width(80.dp)
-                    .clickable(enabled = id != null) { onChannelClick(channel) }
+                    .clickable { onChannelClick(channelItem) }
             ) {
                 AsyncImage(
-                    model = photoUrl,
-                    contentDescription = name,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(channelItem.artworkUrls.firstOrNull())
+                        .placeholder(R.drawable.ic_placeholder_image)
+                        .error(R.drawable.ic_error_image)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = channelItem.title,
                     modifier = Modifier
                         .size(64.dp)
                         .clip(CircleShape),
@@ -338,7 +313,7 @@ private fun FavoriteChannelsRow(channels: List<Any>, onChannelClick: (Any) -> Un
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = name ?: stringResource(R.string.unknown_channel),
+                    text = channelItem.title,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,

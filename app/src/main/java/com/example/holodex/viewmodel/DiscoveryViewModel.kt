@@ -26,6 +26,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
+import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
+import com.example.holodex.viewmodel.mappers.toVideoShell
+import com.example.holodex.viewmodel.mappers.toPlaybackItem
 
 enum class ShelfType {
     RECENT_STREAMS,
@@ -105,9 +108,10 @@ class DiscoveryViewModel @Inject constructor(
                 .onSuccess { songs ->
                     val displayItems = songs.map { song ->
                         val videoShell = song.toVideoShell()
-                        song.toUnifiedDisplayItem(
+                        song.toUnifiedDisplayItem(                        // FIX: Updated signature
+
                             parentVideo = videoShell,
-                            isLiked = false,
+                            isLiked = false, // We don't check likes for trending carousel for performance
                             isDownloaded = false
                         )
                     }

@@ -50,7 +50,8 @@ fun HistoryScreen(
     navController: NavController,
     videoListViewModel: VideoListViewModel,
     favoritesViewModel: FavoritesViewModel,
-    playlistManagementViewModel: PlaylistManagementViewModel
+    playlistManagementViewModel: PlaylistManagementViewModel,
+    contentPadding: PaddingValues = PaddingValues(0.dp) // NEW PARAMETER
 ) {
     val historyViewModel: HistoryViewModel = hiltViewModel()
     val historyItems by historyViewModel.unifiedHistoryItems.collectAsStateWithLifecycle()
@@ -69,6 +70,7 @@ fun HistoryScreen(
                 onRefresh = {}
             )
         } else {
+            // Header is static, List scrolls
             HistoryHeader(
                 songCount = historyItems.size,
                 onPlayAll = { historyViewModel.playAllHistory() },
@@ -78,11 +80,12 @@ fun HistoryScreen(
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                // *** FIX: Use the dynamic content padding ***
+                contentPadding = contentPadding
             ) {
                 items(
                     items = historyItems,
-                    key = { item -> item.stableId } // FIX: Corrected typo from 'stableld'
+                    key = { item -> item.stableId }
                 ) { item ->
                     UnifiedListItem(
                         item = item,
@@ -119,7 +122,7 @@ private fun HistoryHeader(
             Text(
                 text = pluralStringResource(
                     id = R.plurals.song_count_label,
-                    count = songCount, // FIX: Pass count parameter
+                    count = songCount,
                     songCount
                 ),
                 style = MaterialTheme.typography.bodyMedium,

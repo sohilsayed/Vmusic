@@ -1,5 +1,3 @@
-// File: java\com\example\holodex\di\RepositoryModule.kt
-
 package com.example.holodex.di
 
 import android.content.Context
@@ -17,20 +15,19 @@ import com.example.holodex.data.cache.BrowseListCache
 import com.example.holodex.data.cache.SearchListCache
 import com.example.holodex.data.db.AppDatabase
 import com.example.holodex.data.db.DiscoveryDao
-import com.example.holodex.data.db.FavoriteChannelDao
 import com.example.holodex.data.db.HistoryDao
-import com.example.holodex.data.db.LikedItemDao
-import com.example.holodex.data.db.LocalDao
 import com.example.holodex.data.db.PlaylistDao
 import com.example.holodex.data.db.StarredPlaylistDao
 import com.example.holodex.data.db.SyncMetadataDao
+import com.example.holodex.data.db.UnifiedDao // Added
 import com.example.holodex.data.db.VideoDao
 import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.DownloadRepositoryImpl
 import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.data.repository.LocalRepository
+// LocalRepository import removed
 import com.example.holodex.data.repository.SearchHistoryRepository
 import com.example.holodex.data.repository.SharedPreferencesSearchHistoryRepository
+import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.data.repository.UserPreferencesRepository
 import com.example.holodex.data.repository.YouTubeStreamRepository
 import com.example.holodex.data.repository.userPreferencesDataStore
@@ -41,6 +38,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import net.openid.appauth.AuthorizationService
@@ -68,7 +66,6 @@ abstract class RepositoryModule {
         @Provides
         @Singleton
         fun provideHolodexRepository(
-            // --- The existing dependencies are correct ---
             holodexApiService: HolodexApiService,
             musicdexApiService: MusicdexApiService,
             authenticatedMusicdexApiService: AuthenticatedMusicdexApiService,
@@ -76,15 +73,16 @@ abstract class RepositoryModule {
             browseListCache: BrowseListCache,
             searchListCache: SearchListCache,
             videoDao: VideoDao,
-            likedItemDao: LikedItemDao,
             playlistDao: PlaylistDao,
             appDatabase: AppDatabase,
+            // *** THE FIX: Reorder arguments to match the constructor ***
+            @DefaultDispatcher defaultDispatcher: CoroutineDispatcher, // Use Qualifier
             historyDao: HistoryDao,
-            favoriteChannelDao: FavoriteChannelDao,
             syncMetadataDao: SyncMetadataDao,
             starredPlaylistDao: StarredPlaylistDao,
             tokenManager: TokenManager,
-
+            unifiedDao: UnifiedDao,
+            unifiedRepository: UnifiedVideoRepository, // Added
             @ApplicationScope applicationScope: CoroutineScope
         ): HolodexRepository {
             return HolodexRepository(
@@ -95,18 +93,20 @@ abstract class RepositoryModule {
                 browseListCache,
                 searchListCache,
                 videoDao,
-                likedItemDao,
                 playlistDao,
                 appDatabase,
-                Dispatchers.IO,
+                defaultDispatcher, // Correct position
                 historyDao,
-                favoriteChannelDao,
                 syncMetadataDao,
                 starredPlaylistDao,
                 tokenManager,
+                unifiedDao,
+                unifiedRepository, // Pass it here
                 applicationScope
             )
         }
+
+        // provideLocalRepository REMOVED
 
         @Provides
         @Singleton
@@ -130,11 +130,7 @@ abstract class RepositoryModule {
         fun provideUserPreferencesRepository(@ApplicationContext context: Context): UserPreferencesRepository {
             return UserPreferencesRepository(context.userPreferencesDataStore)
         }
-        @Provides
-        @Singleton
-        fun provideLocalRepository(localDao: com.example.holodex.data.db.LocalDao): LocalRepository {
-            return LocalRepository(localDao as LocalDao)
-        }
+
         @Provides
         @Singleton
         fun provideSharedPreferencesSearchHistoryRepository(

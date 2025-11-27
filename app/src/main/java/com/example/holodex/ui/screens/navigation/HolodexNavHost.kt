@@ -3,6 +3,7 @@ package com.example.holodex.ui.navigation
 import android.annotation.SuppressLint
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -20,10 +21,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.example.holodex.auth.LoginScreen
-import com.example.holodex.ui.screens.ChannelScreen
+import com.example.holodex.ui.screens.ChannelDetailsScreen
 import com.example.holodex.ui.screens.DiscoveryScreen
 import com.example.holodex.ui.screens.DownloadsScreen
-import com.example.holodex.ui.screens.ExternalChannelScreen
 import com.example.holodex.ui.screens.ForYouScreen
 import com.example.holodex.ui.screens.FullListViewScreen
 import com.example.holodex.ui.screens.HomeScreen
@@ -39,7 +39,7 @@ import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import com.example.holodex.viewmodel.SettingsViewModel
 import com.example.holodex.viewmodel.VideoDetailsViewModel
 import com.example.holodex.viewmodel.VideoListViewModel
-import org.orbitmvi.orbit.compose.collectAsState // <--- Import
+import org.orbitmvi.orbit.compose.collectAsState
 
 @SuppressLint("UnstableApi")
 @Composable
@@ -48,6 +48,7 @@ fun HolodexNavHost(
     videoListViewModel: VideoListViewModel,
     playlistManagementViewModel: PlaylistManagementViewModel,
     activity: ComponentActivity,
+    contentPadding: PaddingValues, // NEW PARAMETER
     modifier: Modifier = Modifier
 ) {
     NavHost(
@@ -55,19 +56,22 @@ fun HolodexNavHost(
         startDestination = AppDestinations.LIBRARY_ROUTE,
         modifier = modifier.fillMaxSize()
     ) {
-        // ... (Other composables unchanged: Discovery, ForYou, Library, Downloads)
+        // --- Discovery Tab (Uses contentPadding) ---
         composable(AppDestinations.DISCOVERY_ROUTE) {
-            DiscoveryScreen(navController = navController)
+            DiscoveryScreen(
+                navController = navController,
+                contentPadding = contentPadding
+            )
         }
 
         composable(AppDestinations.FOR_YOU_ROUTE) {
             ForYouScreen(navController = navController)
         }
 
+        // --- Home / Browse Tab (Uses contentPadding) ---
         composable(AppDestinations.HOME_ROUTE) {
             val settingsViewModel: SettingsViewModel = hiltViewModel()
 
-            // FIX: Collect state from Orbit
             val state by settingsViewModel.collectAsState()
             val currentApiKey = state.currentApiKey
 
@@ -77,17 +81,28 @@ fun HolodexNavHost(
                 HomeScreen(
                     navController = navController,
                     videoListViewModel = videoListViewModel,
-                    playlistManagementViewModel = playlistManagementViewModel
+                    playlistManagementViewModel = playlistManagementViewModel,
+                    contentPadding = contentPadding
                 )
             }
         }
 
+        // --- Library Tab (Uses contentPadding) ---
         composable(AppDestinations.LIBRARY_ROUTE) {
-            LibraryScreen(navController = navController, playlistManagementViewModel = playlistManagementViewModel)
+            LibraryScreen(
+                navController = navController,
+                playlistManagementViewModel = playlistManagementViewModel,
+                contentPadding = contentPadding
+            )
         }
 
+        // --- Downloads Tab (Uses contentPadding) ---
         composable(AppDestinations.DOWNLOADS_ROUTE) {
-            DownloadsScreen(navController = navController, playlistManagementViewModel = playlistManagementViewModel)
+            DownloadsScreen(
+                navController = navController,
+                playlistManagementViewModel = playlistManagementViewModel,
+                contentPadding = contentPadding
+            )
         }
 
         composable(AppDestinations.SETTINGS_ROUTE) {
@@ -103,19 +118,13 @@ fun HolodexNavHost(
             LoginScreen(onLoginSuccess = { navController.popBackStack() })
         }
 
-        // ... (Parameterized composables unchanged)
-        composable(
-            route = "external_channel_details/{${ChannelDetailsViewModel.CHANNEL_ID_ARG}}",
-            arguments = listOf(navArgument(ChannelDetailsViewModel.CHANNEL_ID_ARG) { type = NavType.StringType })
-        ) {
-            ExternalChannelScreen(navController = navController, onNavigateUp = { navController.popBackStack() })
-        }
+        // --- Detail Screens (Usually draw over bottom bar, so might ignore contentPadding or handle differently) ---
 
         composable(
             route = "channel_details/{${ChannelDetailsViewModel.CHANNEL_ID_ARG}}",
             arguments = listOf(navArgument(ChannelDetailsViewModel.CHANNEL_ID_ARG) { type = NavType.StringType })
         ) {
-            ChannelScreen(navController = navController, onNavigateUp = { navController.popBackStack() })
+            ChannelDetailsScreen(navController = navController, onNavigateUp = { navController.popBackStack() })
         }
 
         composable(

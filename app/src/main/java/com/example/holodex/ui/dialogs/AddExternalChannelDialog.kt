@@ -48,14 +48,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.holodex.R
 import com.example.holodex.data.model.ChannelSearchResult
-import com.example.holodex.viewmodel.ExternalChannelViewModel
+import com.example.holodex.viewmodel.AddChannelViewModel
 import com.example.holodex.viewmodel.state.UiState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddExternalChannelDialog(
     onDismissRequest: () -> Unit,
-    viewModel: ExternalChannelViewModel = hiltViewModel()
+    viewModel: AddChannelViewModel = hiltViewModel()
 ) {
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()

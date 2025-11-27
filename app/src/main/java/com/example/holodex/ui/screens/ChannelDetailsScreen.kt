@@ -49,8 +49,6 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.holodex.R
-import com.example.holodex.data.db.ExternalChannelEntity
-import com.example.holodex.data.db.FavoriteChannelEntity
 import com.example.holodex.data.model.discovery.ChannelDetails
 import com.example.holodex.data.model.discovery.DiscoveryChannel
 import com.example.holodex.data.model.discovery.SingingStreamShelfItem
@@ -77,7 +75,7 @@ import org.orbitmvi.orbit.compose.collectAsState
 @UnstableApi
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChannelScreen(
+fun ChannelDetailsScreen(
     navController: NavController,
     onNavigateUp: () -> Unit
 ) {
@@ -141,14 +139,9 @@ fun ChannelScreen(
                             state.channelDetails?.let { details ->
                                 ChannelHeader(
                                     details = details,
-                                    isFavorited = favoritesState.favoriteChannels.any {
-                                        (it is FavoriteChannelEntity && it.id == details.id) ||
-                                                (it is ExternalChannelEntity && it.channelId == details.id)
-                                    },
+                                    isFavorited = favoritesState.likedItemsMap.containsKey(details.id),
                                     onFavoriteClicked = {
-                                        favoritesViewModel.toggleFavoriteChannelByDetails(
-                                            details
-                                        )
+                                        favoritesViewModel.toggleFavoriteChannel(details)
                                     }
                                 )
                             }

@@ -1,5 +1,3 @@
-// File: java/com/example/holodex/ui/screens/PlaylistsScreen.kt
-// --- REFACTORED AND RENAMED ---
 package com.example.holodex.ui.screens
 
 import androidx.compose.foundation.clickable
@@ -40,7 +38,8 @@ import com.example.holodex.viewmodel.PlaylistManagementViewModel
 fun PlaylistsScreen(
     modifier: Modifier = Modifier,
     playlistManagementViewModel: PlaylistManagementViewModel,
-    onPlaylistClicked: (PlaylistEntity) -> Unit
+    onPlaylistClicked: (PlaylistEntity) -> Unit,
+    contentPadding: PaddingValues = PaddingValues(0.dp) // NEW PARAMETER
 ) {
     val playlists: List<PlaylistEntity> by playlistManagementViewModel.allDisplayablePlaylists.collectAsStateWithLifecycle()
     val showCreateDialog by playlistManagementViewModel.showCreatePlaylistDialog.collectAsStateWithLifecycle()
@@ -67,7 +66,8 @@ fun PlaylistsScreen(
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(vertical = 8.dp)
+                // *** FIX: Use the dynamic content padding ***
+                contentPadding = contentPadding
             ) {
                 items(playlists, key = { it.playlistId }) { playlist ->
                     PlaylistItemRow(
@@ -79,8 +79,6 @@ fun PlaylistsScreen(
                 }
             }
         }
-
-        // FAB is now part of the LibraryScreen scaffold, so it's removed from here
     }
 }
 

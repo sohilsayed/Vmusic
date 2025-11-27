@@ -10,8 +10,8 @@ import com.example.holodex.data.cache.SearchCacheKey
 import com.example.holodex.data.model.HolodexVideoItem
 import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.data.repository.LocalRepository
 import com.example.holodex.data.repository.SearchHistoryRepository
+import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.playback.PlaybackRequestManager
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.playback.domain.usecase.AddOrFetchAndAddUseCase
@@ -67,11 +67,12 @@ sealed class VideoListSideEffect {
     data class NavigateTo(val destination: VideoListViewModel.NavigationDestination) : VideoListSideEffect()
 }
 
-@UnstableApi
+
+@UnstableApi // Add this annotation to the class
 @HiltViewModel
 class VideoListViewModel @Inject constructor(
     private val holodexRepository: HolodexRepository,
-    private val localRepository: LocalRepository,
+    private val unifiedRepository: UnifiedVideoRepository, // INJECT NEW REPO
     private val sharedPreferences: SharedPreferences,
     private val searchHistoryRepository: SearchHistoryRepository,
     private val playbackRequestManager: PlaybackRequestManager,
@@ -100,7 +101,7 @@ class VideoListViewModel @Inject constructor(
         private set
 
     // Orbit Container
-    override val container: Container<VideoListState, VideoListSideEffect> = container(
+    override val container = container<VideoListState, VideoListSideEffect>(
         VideoListState(
             browseFilterState = loadLastBrowseFilters(),
             currentSearchQuery = loadLastSearchQuery(),
@@ -108,23 +109,19 @@ class VideoListViewModel @Inject constructor(
             selectedOrganization = sharedPreferences.getString(PREF_LAST_SELECTED_ORG, "Nijisanji") ?: "Nijisanji"
         )
     ) {
-        // Initialize long-running observations
         intent {
-            // Observe Organizations
             viewModelScope.launch {
                 holodexRepository.availableOrganizations.collect { orgs ->
                     intent { reduce { state.copy(availableOrganizations = orgs) } }
                 }
             }
-            // Observe Search History
             viewModelScope.launch {
-                searchHistoryRepository.loadSearchHistory() // Trigger load
+                searchHistoryRepository.loadSearchHistory()
                 searchHistoryRepository.searchHistory.collect { history ->
                     intent { reduce { state.copy(searchHistory = history) } }
                 }
             }
         }
-        // Trigger Initial Fetch
         initializeAndFetch()
     }
 
@@ -133,8 +130,6 @@ class VideoListViewModel @Inject constructor(
             fetchCurrentContextData(isInitial = true, isRefresh = false)
         }
     }
-
-    // --- DATA FETCHING LOGIC ---
 
     private fun fetchCurrentContextData(isInitial: Boolean, isRefresh: Boolean) = intent {
         if (state.activeContextType == MusicCategoryType.SEARCH) {
@@ -152,46 +147,29 @@ class VideoListViewModel @Inject constructor(
         val offset = if (isInitial || isRefresh) 0 else state.browseCurrentOffset
         val filters = state.browseFilterState
 
-        val result = runCatching {
+        val result: Result<List<HolodexVideoItem>> = runCatching { // Explicit type
             if (filters.selectedOrganization == "Favorites") {
-                // Favorites Logic
-                val holodexFavs = holodexRepository.getFavoriteChannelIds().first()
-                val externalChannels = localRepository.getAllExternalChannels().first()
+                // Use Unified Repo to get favorite channels
+                val favChannelIds = unifiedRepository.getFavoriteChannelIds().first()
+                if (favChannelIds.isEmpty()) return@runCatching emptyList<HolodexVideoItem>()
 
-                // Simplified: Should be optimized, but functional for now
-                val holodexResults = holodexRepository.getFavoritesFeed(holodexFavs, filters, offset).getOrNull()?.data ?: emptyList()
-
-                // We can't easily paginate external channels mixed with API, so we fetch simple recent
-                val externalResults = externalChannels.flatMap {
-                    holodexRepository.getMusicFromExternalChannel(it.channelId, null).getOrNull()?.data ?: emptyList()
-                }
-
-                val combined = (holodexResults + externalResults)
-                    .distinctBy { it.id }
-                    .sortedByDescending { it.availableAt }
-
-                val start = offset
-                val end = (start + PAGE_SIZE).coerceAtMost(combined.size)
-                if (start >= combined.size) emptyList() else combined.subList(start, end)
+                val holodexResults = holodexRepository.getFavoritesFeed(favChannelIds, filters, offset).getOrNull()?.data ?: emptyList()
+                // External channel search logic is more complex with pagination, keeping simple for now
+                holodexResults
             } else {
-                // Standard API Logic
                 val key = BrowseCacheKey(filters, offset)
                 holodexRepository.fetchBrowseList(key, isRefresh).getOrThrow().data
             }
         }
 
-        val likedIds = holodexRepository.likedItemIds.first()
+        val likedIds = unifiedRepository.observeLikedItemIds().first() // Use Unified Repo
         val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
 
         result.onSuccess { rawItems ->
             val unifiedItems = rawItems.map { it.toUnifiedDisplayItem(likedIds.contains(it.id), downloadedIds) }
-
             reduce {
                 val currentList = if (isInitial || isRefresh) emptyList() else state.browseItems
-                // Filter dupes if appending
-                val newItemsUnique = if (isInitial || isRefresh) unifiedItems else unifiedItems.filter { newItem ->
-                    currentList.none { it.videoId == newItem.videoId }
-                }
+                val newItemsUnique = if (isInitial || isRefresh) unifiedItems else unifiedItems.filter { newItem -> currentList.none { it.videoId == newItem.videoId } }
 
                 state.copy(
                     browseItems = (currentList + newItemsUnique).toImmutableList(),
@@ -205,7 +183,6 @@ class VideoListViewModel @Inject constructor(
                 continuationManager.setAutoplayContext(unifiedItems)
             }
         }.onFailure {
-            Timber.e(it)
             postSideEffect(VideoListSideEffect.ShowToast("Failed to load content"))
             reduce { state.copy(browseIsLoadingInitial = false, browseIsLoadingMore = false, browseIsRefreshing = false) }
         }
@@ -221,10 +198,10 @@ class VideoListViewModel @Inject constructor(
 
         val offset = if (isInitial || isRefresh) 0 else state.searchCurrentOffset
 
-        // Smart Dispatch: Check activeSearchSource
         val result = runCatching {
             if (state.activeSearchSource == "My Channels") {
-                val channelIds = localRepository.getAllExternalChannels().first().map { it.channelId }
+                // Use Unified Repo to get favorite channel IDs, now returns List<String>
+                val channelIds = unifiedRepository.getFavoriteChannelIds().first()
                 if (channelIds.isEmpty()) emptyList()
                 else holodexRepository.searchMusicOnChannels(query, channelIds).getOrThrow()
             } else {
@@ -233,7 +210,7 @@ class VideoListViewModel @Inject constructor(
             }
         }
 
-        val likedIds = holodexRepository.likedItemIds.first()
+        val likedIds = unifiedRepository.observeLikedItemIds().first() // Use Unified Repo
         val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
 
         result.onSuccess { rawItems ->

@@ -38,3 +38,11 @@ annotation class MusicdexHttpClient
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class AuthenticatedMusicdexHttpClient
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class IoDispatcher
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class DefaultDispatcher

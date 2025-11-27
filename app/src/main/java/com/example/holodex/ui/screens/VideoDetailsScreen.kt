@@ -72,8 +72,6 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.holodex.R
-import com.example.holodex.data.db.ExternalChannelEntity
-import com.example.holodex.data.db.FavoriteChannelEntity
 import com.example.holodex.data.model.HolodexVideoItem
 import com.example.holodex.ui.composables.ErrorStateWithRetry
 import com.example.holodex.ui.composables.LoadingState
@@ -145,11 +143,16 @@ fun VideoDetailsScreen(
                 },
                 actions = {
                     videoDetails?.let { video ->
-                        val isFavorited = favoritesState.favoriteChannels.any {
-                            (it is FavoriteChannelEntity && it.id == video.channel.id) ||
-                                    (it is ExternalChannelEntity && it.channelId == video.channel.id)
-                        }
-                        IconButton(onClick = { favoritesViewModel.toggleFavoriteChannel(video) }) {
+                        // *** FIX 1: Check Unified Favorites Map ***
+                        // The channel ID is the key in the map.
+                        val channelId = video.channel.id ?: ""
+                        val isFavorited = favoritesState.likedItemsMap.containsKey(channelId)
+
+                        IconButton(onClick = {
+                            // *** FIX 2: Call the overload that accepts HolodexVideoItem ***
+                            // (We already added this overload in FavoritesViewModel previously)
+                            favoritesViewModel.toggleFavoriteChannel(video)
+                        }) {
                             Icon(
                                 imageVector = if (isFavorited) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                                 contentDescription = "Favorite Channel",

@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/viewmodel/mappers/UnifiedDisplayItemMapper.kt
 package com.example.holodex.viewmodel.mappers
 
 import com.example.holodex.data.db.DownloadedItemEntity
@@ -6,6 +5,7 @@ import com.example.holodex.data.db.HistoryItemEntity
 import com.example.holodex.data.db.LikedItemEntity
 import com.example.holodex.data.db.LikedItemType
 import com.example.holodex.data.db.PlaylistItemEntity
+import com.example.holodex.data.db.UnifiedItemProjection
 import com.example.holodex.data.model.HolodexChannelMin
 import com.example.holodex.data.model.HolodexSong
 import com.example.holodex.data.model.HolodexVideoItem
@@ -17,37 +17,34 @@ import com.example.holodex.util.generateArtworkUrlList
 import com.example.holodex.viewmodel.UnifiedDisplayItem
 import kotlin.math.max
 
-// Mappers to UnifiedDisplayItem
+// ============================================================================================
+// TO UNIFIED DISPLAY ITEM (UI Model)
+// ============================================================================================
 
-fun PlaylistItemEntity.toUnifiedDisplayItem(
-    isDownloaded: Boolean,
-    isLiked: Boolean
-): UnifiedDisplayItem {
-    val isSegment = this.itemTypeInPlaylist == LikedItemType.SONG_SEGMENT
-    val durationSec = if (isSegment && this.songStartSecondsPlaylist != null && this.songEndSecondsPlaylist != null) {
-        max(1, (this.songEndSecondsPlaylist - this.songStartSecondsPlaylist)).toLong()
-    } else {
-        0L
-    }
+fun UnifiedItemProjection.toUnifiedDisplayItem(): UnifiedDisplayItem {
+    val downloadInteraction = interactions.find { it.interactionType == "DOWNLOAD" }
+    val likeInteraction = interactions.find { it.interactionType == "LIKE" }
+    val isSegment = metadata.type == "SEGMENT"
 
     return UnifiedDisplayItem(
-        stableId = "playlist_${this.playlistOwnerId}_${this.itemIdInPlaylist}",
-        playbackItemId = this.itemIdInPlaylist,
-        videoId = this.videoIdForItem,
-        channelId = "", // This info is not stored in PlaylistItemEntity, might need to be added if required
-        title = this.songNamePlaylist ?: "Unknown Title",
-        artistText = this.songArtistTextPlaylist ?: "Unknown Artist",
-        artworkUrls = listOfNotNull(this.songArtworkUrlPlaylist),
-        durationText = formatDurationSeconds(durationSec),
+        stableId = "${metadata.type.lowercase()}_${metadata.id}",
+        playbackItemId = metadata.id,
+        videoId = metadata.parentVideoId ?: metadata.id,
+        channelId = metadata.channelId,
+        title = metadata.title,
+        artistText = metadata.artistName,
+        artworkUrls = metadata.getComputedArtworkList(),
+        durationText = formatDurationSeconds(metadata.duration),
         isSegment = isSegment,
-        songCount = null,
-        isDownloaded = isDownloaded,
-        isLiked = isLiked,
-        itemTypeForPlaylist = this.itemTypeInPlaylist,
-        songStartSec = this.songStartSecondsPlaylist,
-        songEndSec = this.songEndSecondsPlaylist,
-        originalArtist = this.songArtistTextPlaylist,
-        isExternal = this.isLocalOnly
+        songCount = if (isSegment) null else metadata.songCount,
+        isDownloaded = downloadInteraction?.downloadStatus == "COMPLETED",
+        downloadStatus = downloadInteraction?.downloadStatus,
+        isLiked = likeInteraction != null,
+        itemTypeForPlaylist = if (isSegment) LikedItemType.SONG_SEGMENT else LikedItemType.VIDEO,
+        songStartSec = metadata.startSeconds?.toInt(),
+        songEndSec = metadata.endSeconds?.toInt(),
+        originalArtist = null,
+        isExternal = metadata.type == "CHANNEL" || metadata.org == "External"
     )
 }
 
@@ -72,6 +69,7 @@ fun HolodexVideoItem.toUnifiedDisplayItem(
         isSegment = false,
         songCount = this.songcount,
         isDownloaded = containsDownloadedSegments,
+        downloadStatus = if (containsDownloadedSegments) "COMPLETED" else null,
         isLiked = isLiked,
         itemTypeForPlaylist = LikedItemType.VIDEO,
         songStartSec = null,
@@ -99,6 +97,7 @@ fun HolodexSong.toUnifiedDisplayItem(
         isSegment = true,
         songCount = null,
         isDownloaded = isDownloaded,
+        downloadStatus = if (isDownloaded) "COMPLETED" else null,
         isLiked = isLiked,
         itemTypeForPlaylist = LikedItemType.SONG_SEGMENT,
         songStartSec = this.start,
@@ -108,26 +107,36 @@ fun HolodexSong.toUnifiedDisplayItem(
     )
 }
 
-fun LikedItemEntity.toUnifiedDisplayItem(isDownloaded: Boolean): UnifiedDisplayItem {
-    val isSegment = this.itemType == LikedItemType.SONG_SEGMENT
+fun PlaylistItemEntity.toUnifiedDisplayItem(
+    isDownloaded: Boolean,
+    isLiked: Boolean
+): UnifiedDisplayItem {
+    val isSegment = this.itemTypeInPlaylist == LikedItemType.SONG_SEGMENT
+    val durationSec = if (isSegment && this.songStartSecondsPlaylist != null && this.songEndSecondsPlaylist != null) {
+        max(1, (this.songEndSecondsPlaylist - this.songStartSecondsPlaylist)).toLong()
+    } else {
+        0L
+    }
+
     return UnifiedDisplayItem(
-        stableId = "liked_${this.itemId}",
-        playbackItemId = this.itemId,
-        videoId = this.videoId,
-        channelId = this.channelIdSnapshot,
-        title = if (isSegment) this.actualSongName ?: this.titleSnapshot else this.titleSnapshot,
-        artistText = if (isSegment) this.actualSongArtist ?: this.artistTextSnapshot else this.artistTextSnapshot,
-        artworkUrls = generateArtworkUrlList(this.toPlaybackItem(), ThumbnailQuality.MEDIUM),
-        durationText = formatDurationSeconds(this.durationSecSnapshot),
+        stableId = "playlist_${this.playlistOwnerId}_${this.itemIdInPlaylist}",
+        playbackItemId = this.itemIdInPlaylist,
+        videoId = this.videoIdForItem,
+        channelId = "",
+        title = this.songNamePlaylist ?: "Unknown Title",
+        artistText = this.songArtistTextPlaylist ?: "Unknown Artist",
+        artworkUrls = listOfNotNull(this.songArtworkUrlPlaylist),
+        durationText = formatDurationSeconds(durationSec),
         isSegment = isSegment,
         songCount = null,
         isDownloaded = isDownloaded,
-        isLiked = true,
-        itemTypeForPlaylist = this.itemType,
-        songStartSec = this.songStartSeconds,
-        songEndSec = this.songEndSeconds,
-        originalArtist = this.actualSongArtist,
-        isExternal = false
+        downloadStatus = if (isDownloaded) "COMPLETED" else null,
+        isLiked = isLiked,
+        itemTypeForPlaylist = this.itemTypeInPlaylist,
+        songStartSec = this.songStartSecondsPlaylist,
+        songEndSec = this.songEndSecondsPlaylist,
+        originalArtist = this.songArtistTextPlaylist,
+        isExternal = this.isLocalOnly
     )
 }
 
@@ -147,11 +156,36 @@ fun HistoryItemEntity.toUnifiedDisplayItem(
         isSegment = true,
         songCount = null,
         isDownloaded = isDownloaded,
+        downloadStatus = if (isDownloaded) "COMPLETED" else null,
         isLiked = isLiked,
         itemTypeForPlaylist = LikedItemType.SONG_SEGMENT,
         songStartSec = this.songStartSeconds,
         songEndSec = (this.songStartSeconds + this.durationSec).toInt(),
         originalArtist = null,
+        isExternal = false
+    )
+}
+
+fun LikedItemEntity.toUnifiedDisplayItem(isDownloaded: Boolean): UnifiedDisplayItem {
+    val isSegment = this.itemType == LikedItemType.SONG_SEGMENT
+    return UnifiedDisplayItem(
+        stableId = "liked_${this.itemId}",
+        playbackItemId = this.itemId,
+        videoId = this.videoId,
+        channelId = this.channelIdSnapshot,
+        title = if (isSegment) this.actualSongName ?: this.titleSnapshot else this.titleSnapshot,
+        artistText = if (isSegment) this.actualSongArtist ?: this.artistTextSnapshot else this.artistTextSnapshot,
+        artworkUrls = generateArtworkUrlList(this.toPlaybackItem(), ThumbnailQuality.MEDIUM),
+        durationText = formatDurationSeconds(this.durationSecSnapshot),
+        isSegment = isSegment,
+        songCount = null,
+        isDownloaded = isDownloaded,
+        downloadStatus = if (isDownloaded) "COMPLETED" else null,
+        isLiked = true,
+        itemTypeForPlaylist = this.itemType,
+        songStartSec = this.songStartSeconds,
+        songEndSec = this.songEndSeconds,
+        originalArtist = this.actualSongArtist,
         isExternal = false
     )
 }
@@ -172,6 +206,7 @@ fun DownloadedItemEntity.toUnifiedDisplayItem(isLiked: Boolean): UnifiedDisplayI
         isSegment = true,
         songCount = null,
         isDownloaded = true,
+        downloadStatus = this.downloadStatus.name,
         isLiked = isLiked,
         itemTypeForPlaylist = LikedItemType.SONG_SEGMENT,
         songStartSec = songStartSec,
@@ -181,7 +216,84 @@ fun DownloadedItemEntity.toUnifiedDisplayItem(isLiked: Boolean): UnifiedDisplayI
     )
 }
 
-// Mappers to PlaybackItem
+fun MusicdexSong.toUnifiedDisplayItem(
+    parentVideo: HolodexVideoItem,
+    isLiked: Boolean,
+    isDownloaded: Boolean
+): UnifiedDisplayItem {
+    val playbackItemId = "${this.videoId}_${this.start}"
+    return UnifiedDisplayItem(
+        stableId = "song_${playbackItemId}",
+        playbackItemId = playbackItemId,
+        videoId = this.videoId,
+        channelId = this.channel.id ?: "",
+        title = this.name,
+        artistText = this.channel.name,
+        artworkUrls = generateArtworkUrlList(this.toPlaybackItem(parentVideo), ThumbnailQuality.MEDIUM),
+        durationText = formatDurationSeconds((this.end - this.start).toLong()),
+        isSegment = true,
+        songCount = null,
+        isDownloaded = isDownloaded,
+        downloadStatus = if (isDownloaded) "COMPLETED" else null,
+        isLiked = isLiked,
+        itemTypeForPlaylist = LikedItemType.SONG_SEGMENT,
+        songStartSec = this.start,
+        songEndSec = this.end,
+        originalArtist = this.originalArtist,
+        isExternal = parentVideo.channel.org == "External"
+    )
+}
+fun MusicdexSong.toPlaybackItem(parentVideo: HolodexVideoItem): PlaybackItem {
+    val playbackId = "${this.videoId}_${this.start}"
+    return PlaybackItem(
+        id = playbackId,
+        videoId = parentVideo.id,
+        serverUuid = this.id, // MusicdexSong has the server ID
+        songId = playbackId,
+        title = this.name,
+        artistText = parentVideo.channel.name,
+        albumText = parentVideo.title,
+        artworkUri = this.artUrl,
+        durationSec = (this.end - this.start).toLong(),
+        streamUri = null,
+        clipStartSec = this.start.toLong(),
+        clipEndSec = this.end.toLong(),
+        description = parentVideo.description,
+        channelId = parentVideo.channel.id ?: "unknown",
+        originalArtist = this.originalArtist,
+        isExternal = parentVideo.channel.org == "External"
+    )
+}
+fun HolodexVideoItem.toVirtualSegmentUnifiedDisplayItem(
+    isLiked: Boolean,
+    isDownloaded: Boolean
+): UnifiedDisplayItem {
+    val playbackItemId = "${this.id}_0"
+    return UnifiedDisplayItem(
+        stableId = "video_as_segment_${this.id}",
+        playbackItemId = playbackItemId,
+        videoId = this.id,
+        channelId = this.channel.id ?: "",
+        title = this.title,
+        artistText = this.channel.name,
+        artworkUrls = generateArtworkUrlList(this.toPlaybackItem(), ThumbnailQuality.MEDIUM),
+        durationText = formatDurationSeconds(this.duration),
+        isSegment = true,
+        songCount = 0,
+        isDownloaded = isDownloaded,
+        downloadStatus = if (isDownloaded) "COMPLETED" else null,
+        isLiked = isLiked,
+        itemTypeForPlaylist = LikedItemType.VIDEO,
+        songStartSec = 0,
+        songEndSec = this.duration.toInt(),
+        originalArtist = null,
+        isExternal = this.channel.org == "External"
+    )
+}
+
+// ============================================================================================
+// TO PLAYBACK ITEM (Player Model)
+// ============================================================================================
 
 fun UnifiedDisplayItem.toPlaybackItem(): PlaybackItem {
     return PlaybackItem(
@@ -225,7 +337,7 @@ fun HolodexVideoItem.toPlaybackItem(): PlaybackItem {
     )
 }
 
-internal fun HolodexSong.toPlaybackItem(parentVideo: HolodexVideoItem): PlaybackItem {
+fun HolodexSong.toPlaybackItem(parentVideo: HolodexVideoItem): PlaybackItem {
     val playbackId = "${parentVideo.id}_${this.start}"
     return PlaybackItem(
         id = playbackId,
@@ -247,7 +359,7 @@ internal fun HolodexSong.toPlaybackItem(parentVideo: HolodexVideoItem): Playback
     )
 }
 
-internal fun LikedItemEntity.toPlaybackItem(): PlaybackItem {
+fun LikedItemEntity.toPlaybackItem(): PlaybackItem {
     return PlaybackItem(
         id = this.itemId,
         videoId = this.videoId,
@@ -268,7 +380,7 @@ internal fun LikedItemEntity.toPlaybackItem(): PlaybackItem {
     )
 }
 
-internal fun HistoryItemEntity.toPlaybackItem(): PlaybackItem {
+fun HistoryItemEntity.toPlaybackItem(): PlaybackItem {
     return PlaybackItem(
         id = this.itemId,
         videoId = this.videoId,
@@ -289,7 +401,7 @@ internal fun HistoryItemEntity.toPlaybackItem(): PlaybackItem {
     )
 }
 
-internal fun DownloadedItemEntity.toPlaybackItem(): PlaybackItem {
+fun DownloadedItemEntity.toPlaybackItem(): PlaybackItem {
     val parentVideoId = this.videoId.substringBeforeLast('_')
     val songStartSec = this.videoId.substringAfterLast('_').toLongOrNull()
 
@@ -313,86 +425,26 @@ internal fun DownloadedItemEntity.toPlaybackItem(): PlaybackItem {
     )
 }
 
-internal fun MusicdexSong.toVideoShell(): HolodexVideoItem {
+fun MusicdexSong.toVideoShell(albumTitle: String = "Unknown Video"): HolodexVideoItem {
     return HolodexVideoItem(
-        id = this.videoId, title = "Unknown Video", type = "stream", topicId = null,
-        availableAt = "", publishedAt = null, duration = (this.end - this.start).toLong(),
+        id = this.videoId,
+        title = albumTitle,
+        type = "stream",
+        topicId = null,
+        availableAt = "",
+        publishedAt = null,
+        duration = (this.end - this.start).toLong(),
         status = "past",
         channel = HolodexChannelMin(
-            id = this.channel.id ?: this.channelId, name = this.channel.name,
-            englishName = this.channel.englishName, org = null, type = "vtuber",
+            id = this.channel.id ?: this.channelId,
+            name = this.channel.name,
+            englishName = this.channel.englishName,
+            org = null,
+            type = "vtuber",
             photoUrl = this.channel.photoUrl
         ),
-        songcount = 1, description = null, songs = null
-    )
-}
-internal fun MusicdexSong.toVideoShell(albumTitle: String): HolodexVideoItem {
-    return this.toVideoShell().copy(title = albumTitle)
-}
-fun MusicdexSong.toUnifiedDisplayItem(
-    parentVideo: HolodexVideoItem,
-    isLiked: Boolean,
-    isDownloaded: Boolean
-): UnifiedDisplayItem {
-    val playbackItemId = "${this.videoId}_${this.start}"
-    return UnifiedDisplayItem(
-        stableId = "song_${playbackItemId}", playbackItemId = playbackItemId, videoId = this.videoId,
-        channelId = this.channel.id ?: "", title = this.name, artistText = this.channel.name,
-        artworkUrls = generateArtworkUrlList(this.toPlaybackItem(parentVideo), ThumbnailQuality.MEDIUM),
-        durationText = formatDurationSeconds((this.end - this.start).toLong()),
-        isSegment = true, songCount = null, isDownloaded = isDownloaded, isLiked = isLiked,
-        itemTypeForPlaylist = LikedItemType.SONG_SEGMENT, songStartSec = this.start,
-        songEndSec = this.end, originalArtist = this.originalArtist,
-        isExternal = parentVideo.channel.org == "External"
-    )
-}
-
-internal fun MusicdexSong.toPlaybackItem(parentVideo: HolodexVideoItem): PlaybackItem {
-    val reliableChannelId = this.channelId ?: parentVideo.channel.id ?: this.videoId
-    val playbackId = "${this.videoId}_${this.start}"
-
-    return PlaybackItem(
-        id = playbackId,
-        videoId = this.videoId,
-        serverUuid = this.id,
-        songId = playbackId,
-        title = this.name,
-        artistText = this.channel.name,
-        albumText = parentVideo.title,
-        artworkUri = this.artUrl,
-        durationSec = (this.end - this.start).toLong(),
-        streamUri = null,
-        clipStartSec = this.start.toLong(),
-        clipEndSec = this.end.toLong(),
+        songcount = 1,
         description = null,
-        channelId = reliableChannelId,
-        originalArtist = this.originalArtist,
-        isExternal = false
-    )
-}
-
-fun HolodexVideoItem.toVirtualSegmentUnifiedDisplayItem(
-    isLiked: Boolean,
-    isDownloaded: Boolean
-): UnifiedDisplayItem {
-    val playbackItemId = "${this.id}_0"
-    return UnifiedDisplayItem(
-        stableId = "video_as_segment_${this.id}",
-        playbackItemId = playbackItemId,
-        videoId = this.id,
-        channelId = this.channel.id ?: "",
-        title = this.title,
-        artistText = this.channel.name,
-        artworkUrls = generateArtworkUrlList(this.toPlaybackItem(), ThumbnailQuality.MEDIUM),
-        durationText = formatDurationSeconds(this.duration),
-        isSegment = true,
-        songCount = 0,
-        isDownloaded = isDownloaded,
-        isLiked = isLiked,
-        itemTypeForPlaylist = LikedItemType.VIDEO,
-        songStartSec = 0,
-        songEndSec = this.duration.toInt(),
-        originalArtist = null,
-        isExternal = this.channel.org == "External"
+        songs = null
     )
 }

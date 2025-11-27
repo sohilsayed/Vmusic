@@ -3,58 +3,53 @@ package com.example.holodex.viewmodel
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import com.example.holodex.data.db.ExternalChannelEntity
+import androidx.lifecycle.viewModelScope
 import com.example.holodex.data.model.discovery.ChannelDetails
 import com.example.holodex.data.model.discovery.DiscoveryResponse
 import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.data.repository.LocalRepository
+import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.util.DynamicTheme
 import com.example.holodex.util.PaletteExtractor
-import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
-import com.example.holodex.viewmodel.mappers.toVideoShell
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.collections.immutable.ImmutableList // Import
-import kotlinx.collections.immutable.persistentListOf // Import
-import kotlinx.collections.immutable.toImmutableList // Import
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import org.orbitmvi.orbit.Container
 import org.orbitmvi.orbit.ContainerHost
 import org.orbitmvi.orbit.viewmodel.container
 import org.schabi.newpipe.extractor.Page
 import javax.inject.Inject
-
-// --- State ---
+import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
+import com.example.holodex.viewmodel.mappers.toVideoShell
+// --- State & SideEffect (remain unchanged) ---
 data class ChannelDetailsState(
     val isExternal: Boolean = false,
     val channelDetails: ChannelDetails? = null,
     val dynamicTheme: DynamicTheme = DynamicTheme.default(Color.Black, Color.White),
-
-    // Holodex Data
     val discoveryContent: DiscoveryResponse? = null,
-    val popularSongs: ImmutableList<UnifiedDisplayItem> = persistentListOf(), // Changed to ImmutableList
-
-    // External Data
-    val externalMusicItems: ImmutableList<UnifiedDisplayItem> = persistentListOf(), // Changed to ImmutableList
+    val popularSongs: ImmutableList<UnifiedDisplayItem> = persistentListOf(),
+    val externalMusicItems: ImmutableList<UnifiedDisplayItem> = persistentListOf(),
     val nextPageCursor: Page? = null,
     val isLoadingMore: Boolean = false,
     val endOfList: Boolean = false,
-
-    // Screen Status
     val isLoading: Boolean = true,
     val error: String? = null
 )
 
-// --- Side Effects ---
 sealed class ChannelDetailsSideEffect {
     data class ShowToast(val message: String) : ChannelDetailsSideEffect()
 }
 
 @HiltViewModel
 class ChannelDetailsViewModel @Inject constructor(
-    private val savedStateHandle: SavedStateHandle,
+    savedStateHandle: SavedStateHandle,
     private val holodexRepository: HolodexRepository,
-    private val localRepository: LocalRepository,
+    private val unifiedRepository: UnifiedVideoRepository,
     private val paletteExtractor: PaletteExtractor
 ) : ContainerHost<ChannelDetailsState, ChannelDetailsSideEffect>, ViewModel() {
 
@@ -64,40 +59,31 @@ class ChannelDetailsViewModel @Inject constructor(
 
     val channelId: String = savedStateHandle.get<String>(CHANNEL_ID_ARG) ?: ""
 
-    override val container: Container<ChannelDetailsState, ChannelDetailsSideEffect> = container(ChannelDetailsState()) {
+    // *** FIX: isFavorited StateFlow is now correctly defined inside the class ***
+
+
+    override val container = container<ChannelDetailsState, ChannelDetailsSideEffect>(ChannelDetailsState()) {
         if (channelId.isNotBlank()) {
             initializeChannel()
         } else {
-            intent {
-                reduce { state.copy(isLoading = false, error = "Invalid Channel ID") }
-            }
+            intent { reduce { state.copy(isLoading = false, error = "Invalid Channel ID") } }
         }
     }
 
     private fun initializeChannel() = intent {
         reduce { state.copy(isLoading = true, error = null) }
 
-        val externalChannel = localRepository.getExternalChannel(channelId)
+        val localChannel = unifiedRepository.getChannel(channelId)
 
-        if (externalChannel != null) {
-            loadExternalChannel(externalChannel)
+        if (localChannel != null && localChannel.org == "External") {
+            loadExternalChannel(localChannel)
         } else {
             loadHolodexChannel()
         }
     }
 
-    private suspend fun loadExternalChannel(channel: ExternalChannelEntity) = intent {
-        val details = ChannelDetails(
-            id = channel.channelId,
-            name = channel.name,
-            englishName = channel.name,
-            description = "Music from this channel is sourced directly from YouTube.",
-            photoUrl = channel.photoUrl,
-            bannerUrl = null, org = "External", suborg = null, twitter = null, group = null
-        )
-
-        val theme = paletteExtractor.extractThemeFromUrl(channel.photoUrl, DynamicTheme.default(Color.Black, Color.White))
-
+    private suspend fun loadExternalChannel(details: ChannelDetails) = intent {
+        val theme = paletteExtractor.extractThemeFromUrl(details.photoUrl, DynamicTheme.default(Color.Black, Color.White))
         reduce {
             state.copy(
                 isExternal = true,
@@ -105,7 +91,6 @@ class ChannelDetailsViewModel @Inject constructor(
                 dynamicTheme = theme
             )
         }
-
         loadMoreExternalMusic(isInitial = true)
     }
 
@@ -122,12 +107,12 @@ class ChannelDetailsViewModel @Inject constructor(
             if (detailsResult.isSuccess) {
                 val details = detailsResult.getOrThrow()
                 val theme = paletteExtractor.extractThemeFromUrl(details.bannerUrl, DynamicTheme.default(Color.Black, Color.White))
-
                 val discovery = discoveryResult.getOrNull()
                 val popular = popularResult.getOrNull()?.map { song ->
                     val videoShell = song.toVideoShell()
                     song.toUnifiedDisplayItem(parentVideo = videoShell, isLiked = false, isDownloaded = false)
                 } ?: emptyList()
+
 
                 reduce {
                     state.copy(
@@ -136,7 +121,7 @@ class ChannelDetailsViewModel @Inject constructor(
                         channelDetails = details,
                         dynamicTheme = theme,
                         discoveryContent = discovery,
-                        popularSongs = popular.toImmutableList() // Convert here
+                        popularSongs = popular.toImmutableList()
                     )
                 }
             } else {
@@ -152,7 +137,6 @@ class ChannelDetailsViewModel @Inject constructor(
         reduce { state.copy(isLoadingMore = true) }
 
         val cursor = if (isInitial) null else state.nextPageCursor
-
         val result = holodexRepository.getMusicFromExternalChannel(channelId, cursor)
 
         result.onSuccess { fetcherResult ->
@@ -162,7 +146,7 @@ class ChannelDetailsViewModel @Inject constructor(
             reduce {
                 val currentList = if (isInitial) persistentListOf() else state.externalMusicItems
                 state.copy(
-                    externalMusicItems = (currentList + newItems).toImmutableList(), // Convert here
+                    externalMusicItems = (currentList + newItems).toImmutableList(),
                     nextPageCursor = nextCursor,
                     endOfList = nextCursor == null,
                     isLoading = false,

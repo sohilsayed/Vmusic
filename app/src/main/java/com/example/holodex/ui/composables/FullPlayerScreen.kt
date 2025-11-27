@@ -228,7 +228,7 @@ internal fun FullPlayerScreenContent(
     // Computed states
     val isCurrentItemLiked = remember(currentItem, favoritesState.likedItemsMap) {
         currentItem?.let { pbItem ->
-            val likeId = favoritesViewModel.getLikeIdForPlaybackItem(pbItem)
+            val likeId = pbItem.id
             favoritesState.likedItemsMap.containsKey(likeId)
         } == true
     }

@@ -7,7 +7,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -46,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,6 +79,7 @@ fun HomeScreen(
     navController: NavController,
     videoListViewModel: VideoListViewModel,
     playlistManagementViewModel: PlaylistManagementViewModel,
+    contentPadding: PaddingValues // NEW PARAMETER
 ) {
     val favoritesViewModel: FavoritesViewModel = hiltViewModel()
     val context = LocalContext.current
@@ -98,15 +103,13 @@ fun HomeScreen(
                         navController.navigate(AppDestinations.videoDetailRoute(destination.videoId))
                     }
                     is VideoListViewModel.NavigationDestination.HomeScreenWithSearch -> {
-                        // Already on Home Screen, logic handled by state update
+                        // Already on Home Screen
                     }
                 }
             }
         }
     }
 
-    // --- Derived State for Search History ---
-    // FIX: Use the list directly from the Orbit State
     val searchHistory = state.searchHistory
 
     BackHandler(enabled = state.isSearchActive) {
@@ -123,22 +126,35 @@ fun HomeScreen(
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    FloatingActionButton(onClick = { coroutineScope.launch { listState.animateScrollToItem(0) } }) {
+                    // Adjust FAB padding to be above the bottom bar
+                    FloatingActionButton(
+                        onClick = { coroutineScope.launch { listState.animateScrollToItem(0) } },
+                        modifier = Modifier.padding(bottom = contentPadding.calculateBottomPadding())
+                    ) {
                         Icon(Icons.Filled.KeyboardArrowUp, stringResource(R.string.scroll_to_top))
                     }
                 }
             }
         ) { innerPadding ->
-            Box(modifier = Modifier.padding(innerPadding).padding(top = 80.dp)) {
 
+            // Combine the padding from this Scaffold (Search Bar offset) with the dynamic bottom bar padding
+            val unifiedPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding() + 80.dp, // Search bar height offset
+                bottom = contentPadding.calculateBottomPadding() + 16.dp,
+                start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
+                end = innerPadding.calculateEndPadding(LocalLayoutDirection.current)
+            )
+
+            Box(modifier = Modifier.fillMaxSize()) {
                 if (state.activeContextType == MusicCategoryType.SEARCH) {
                     // --- SEARCH CONTENT ---
                     if (state.searchIsLoadingInitial && state.searchItems.isEmpty()) {
-                        LoadingSkeleton(modifier = Modifier.fillMaxSize())
+                        LoadingSkeleton(modifier = Modifier.fillMaxSize().padding(top = 80.dp))
                     } else if (state.searchItems.isEmpty() && state.searchEndOfList && !state.searchIsLoadingInitial) {
                         EmptyState(
                             message = stringResource(R.string.status_search_no_results, state.currentSearchQuery),
-                            onRefresh = { videoListViewModel.refreshCurrentListViaPull() }
+                            onRefresh = { videoListViewModel.refreshCurrentListViaPull() },
+                            modifier = Modifier.padding(top = 80.dp)
                         )
                     } else {
                         CustomPagedUnifiedList(
@@ -157,13 +173,14 @@ fun HomeScreen(
                             endOfList = state.searchEndOfList,
                             onLoadMore = { videoListViewModel.loadMore(MusicCategoryType.SEARCH) },
                             isRefreshing = false,
-                            onRefresh = {}
+                            onRefresh = {},
+                            contentPadding = unifiedPadding // PASS THE PADDING HERE
                         )
                     }
                 } else {
                     // --- BROWSE CONTENT ---
                     if (state.browseIsLoadingInitial && state.browseItems.isEmpty()) {
-                        LoadingSkeleton(modifier = Modifier.fillMaxSize())
+                        LoadingSkeleton(modifier = Modifier.fillMaxSize().padding(top = 80.dp))
                     } else {
                         CustomPagedUnifiedList(
                             listKeyPrefix = "home_browse",
@@ -180,13 +197,15 @@ fun HomeScreen(
                             navController = navController,
                             onLoadMore = { videoListViewModel.loadMore(state.activeContextType) },
                             isRefreshing = state.browseIsRefreshing,
-                            onRefresh = { videoListViewModel.refreshCurrentListViaPull() }
+                            onRefresh = { videoListViewModel.refreshCurrentListViaPull() },
+                            contentPadding = unifiedPadding // PASS THE PADDING HERE
                         )
                     }
                 }
             }
         }
 
+        // Search Bar (Overlay)
         DockedSearchBar(
             modifier = Modifier
                 .align(Alignment.TopCenter)

@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DocumentScanner
@@ -73,6 +74,7 @@ import com.example.holodex.auth.AuthViewModel
 import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.data.ThemePreference
 import com.example.holodex.ui.composables.ApiKeyInputScreen
+import com.example.holodex.ui.dialogs.AddExternalChannelDialog
 import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.viewmodel.ScanStatus
 import com.example.holodex.viewmodel.SettingsSideEffect
@@ -93,9 +95,20 @@ fun SettingsScreen(
 
     val context = LocalContext.current
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
-
-    // FIX: Collect consolidated state
     val state by settingsViewModel.collectAsState()
+
+    // Local state for the dialog visibility
+    // We keep this local because opening/closing a dialog is UI state, not business logic
+    var showAddChannelDialog by remember { mutableStateOf(false) }
+
+    // Dialog Composable
+    if (showAddChannelDialog) {
+        // The dialog uses its own Hilt ViewModel (AddChannelViewModel) internally
+        // which is fully migrated to the Unified System.
+        AddExternalChannelDialog(
+            onDismissRequest = { showAddChannelDialog = false }
+        )
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -120,14 +133,12 @@ fun SettingsScreen(
     )
     var showRestartMessageForDataSettings by remember { mutableStateOf(false) }
 
-    // FIX: Observe Side Effects
     settingsViewModel.collectSideEffect { effect ->
         when(effect) {
             is SettingsSideEffect.ShowToast -> Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
         }
     }
 
-    // Listen for cache clear status in state
     LaunchedEffect(state.cacheClearStatus) {
         state.cacheClearStatus?.let { status ->
             Toast.makeText(context, status, Toast.LENGTH_LONG).show()
@@ -136,7 +147,6 @@ fun SettingsScreen(
         }
     }
 
-    // Listen for scan status in state
     LaunchedEffect(state.scanStatus) {
         when (val status = state.scanStatus) {
             is ScanStatus.Complete -> {
@@ -153,7 +163,6 @@ fun SettingsScreen(
     }
 
     if (showRestartMessageForDataSettings) {
-        // Reset flag immediately after showing logic (toast logic moved to side effect or kept simple)
         LaunchedEffect(Unit) {
             Toast.makeText(context, "Settings apply after app restart.", Toast.LENGTH_LONG).show()
             showRestartMessageForDataSettings = false
@@ -180,6 +189,7 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
+            // ... (API Key Section - Keep as is) ...
             SettingsSectionTitle(stringResource(R.string.settings_section_api_key))
             ApiKeyInputScreen(
                 settingsViewModel = settingsViewModel,
@@ -188,8 +198,25 @@ fun SettingsScreen(
             )
 
             HorizontalDivider()
-            SettingsSectionTitle(stringResource(R.string.settings_section_account))
 
+            // --- NEW SECTION: CONTENT SOURCES ---
+            SettingsSectionTitle("Content Sources")
+
+            ListItem(
+                headlineContent = { Text("Add YouTube Channel") },
+                supportingContent = { Text("Import music from external YouTube channels.", style = MaterialTheme.typography.bodySmall) },
+                leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
+                modifier = Modifier.clickable {
+                    showAddChannelDialog = true // Open Dialog
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            )
+
+            HorizontalDivider()
+            // ------------------------------------
+
+            SettingsSectionTitle(stringResource(R.string.settings_section_account))
+            // ... (Account Section - Keep as is) ...
             when (val s = authState) {
                 is AuthState.LoggedIn -> {
                     ListItem(
@@ -224,14 +251,16 @@ fun SettingsScreen(
                     ListItem(headlineContent = { Text("Logging in...") }, leadingContent = { CircularProgressIndicator(modifier = Modifier.size(24.dp)) }, colors = ListItemDefaults.colors(containerColor = Color.Transparent))
                 }
             }
+
             HorizontalDivider()
             SettingsSectionTitle(stringResource(R.string.settings_section_playback))
+            // ... (Playback Section - Keep as is) ...
             ListItem(
                 headlineContent = { Text(stringResource(R.string.settings_label_autoplay_next_video)) },
                 supportingContent = { Text(stringResource(R.string.settings_desc_autoplay_next_video), style = MaterialTheme.typography.bodySmall) },
                 trailingContent = {
                     Switch(
-                        checked = state.autoplayEnabled, // FIX: Use state
+                        checked = state.autoplayEnabled,
                         onCheckedChange = { settingsViewModel.setAutoplayNextVideoEnabled(it) }
                     )
                 },
@@ -243,7 +272,7 @@ fun SettingsScreen(
                 supportingContent = { Text(stringResource(R.string.settings_desc_shuffle_on_play), style = MaterialTheme.typography.bodySmall) },
                 trailingContent = {
                     Switch(
-                        checked = state.shuffleOnPlayStartEnabled, // FIX: Use state
+                        checked = state.shuffleOnPlayStartEnabled,
                         onCheckedChange = { settingsViewModel.setShuffleOnPlayStartEnabled(it) }
                     )
                 },
@@ -255,6 +284,8 @@ fun SettingsScreen(
             HorizontalDivider()
 
             SettingsSectionTitle(stringResource(R.string.settings_section_data_performance))
+
+            // ... (Data & Performance - Keep Migrate Button and Legacy Import) ...
 
             ListItem(
                 headlineContent = { Text("Import Legacy Downloads") },
@@ -275,6 +306,7 @@ fun SettingsScreen(
             )
 
             PreferenceGroupTitle(stringResource(R.string.settings_label_download_location))
+            // ... (Location, Image Quality, Audio Quality, etc. - Keep as is) ...
             ListItem(
                 headlineContent = {
                     Text(if (state.downloadLocation.isEmpty()) stringResource(R.string.settings_download_location_default) else state.downloadLocation, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -295,7 +327,7 @@ fun SettingsScreen(
                 ImageQualityOptions.entries.forEach { quality ->
                     PreferenceRadioButton(
                         text = quality.displayName,
-                        selected = state.currentImageQuality == quality.key, // FIX: Use state
+                        selected = state.currentImageQuality == quality.key,
                         onClick = {
                             settingsViewModel.setImageQualityPreference(quality.key)
                             if (quality.key != AppPreferenceConstants.IMAGE_QUALITY_AUTO) showRestartMessageForDataSettings = true
@@ -310,7 +342,7 @@ fun SettingsScreen(
                 AudioQualityOptions.entries.forEach { quality ->
                     PreferenceRadioButton(
                         text = quality.displayName,
-                        selected = state.currentAudioQuality == quality.key, // FIX: Use state
+                        selected = state.currentAudioQuality == quality.key,
                         onClick = { settingsViewModel.setAudioQualityPreference(quality.key) }
                     )
                 }
@@ -322,7 +354,7 @@ fun SettingsScreen(
                 ListLoadingConfigOptions.entries.forEach { config ->
                     PreferenceRadioButton(
                         text = config.displayName,
-                        selected = state.currentListLoadingConfig == config.key, // FIX: Use state
+                        selected = state.currentListLoadingConfig == config.key,
                         onClick = {
                             settingsViewModel.setListLoadingConfigPreference(config.key)
                             showRestartMessageForDataSettings = true
@@ -337,7 +369,7 @@ fun SettingsScreen(
                 BufferingStrategyOptions.entries.forEach { strategy ->
                     PreferenceRadioButton(
                         text = strategy.displayName,
-                        selected = state.currentBufferingStrategy == strategy.key, // FIX: Use state
+                        selected = state.currentBufferingStrategy == strategy.key,
                         onClick = {
                             settingsViewModel.setBufferingStrategyPreference(strategy.key)
                             showRestartMessageForDataSettings = true
@@ -370,7 +402,7 @@ fun SettingsScreen(
                 ThemePreferenceOptions.entries.forEach { themeOpt ->
                     PreferenceRadioButton(
                         text = themeOpt.displayName,
-                        selected = state.currentTheme == themeOpt.key, // FIX: Use state
+                        selected = state.currentTheme == themeOpt.key,
                         onClick = { settingsViewModel.setThemePreference(themeOpt.key) }
                     )
                 }
@@ -389,7 +421,7 @@ fun SettingsScreen(
     }
 }
 
-// ... (Helper Composables & Enums remain unchanged) ...
+// ... (Keep all helper Composables and Enums at the bottom of the file) ...
 @Composable
 private fun SettingsSectionTitle(title: String) {
     Text(text = title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))

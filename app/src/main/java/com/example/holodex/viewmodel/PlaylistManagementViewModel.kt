@@ -17,7 +17,6 @@ import com.example.holodex.data.db.StarredPlaylistEntity
 import com.example.holodex.data.model.discovery.PlaylistStub
 import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.data.repository.LocalRepository
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.util.PlaylistFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -50,7 +49,6 @@ data class PendingPlaylistItemDetails(
 class PlaylistManagementViewModel @Inject constructor(
     private val application: Application,
     private val holodexRepository: HolodexRepository,
-    private val localRepository: LocalRepository,
     private val downloadRepository: DownloadRepository
 ) : ViewModel() {
 
@@ -69,8 +67,7 @@ class PlaylistManagementViewModel @Inject constructor(
             userCreatedPlaylists,
             starredPlaylists,
             downloadsFlow,
-            localRepository.getAllLocalPlaylists() // Combine local playlists
-        ) { userPlaylists, starred, downloads, localPlaylists ->
+        ) { userPlaylists, starred, downloads ->
             val syntheticPlaylists = mutableListOf<PlaylistEntity>()
             val now = Instant.now().toString()
 
@@ -117,19 +114,9 @@ class PlaylistManagementViewModel @Inject constructor(
             val starredServerIds = starred.map { it.playlistId }.toSet()
             val uniqueUserPlaylists = userPlaylists.filter { it.serverId !in starredServerIds }
 
-            // Add local playlists from the new table
-            val localAsDisplayable = localPlaylists.map { localPlaylist ->
-                PlaylistEntity(
-                    playlistId = localPlaylist.localPlaylistId * -1, // Use negative ID to distinguish
-                    name = localPlaylist.name,
-                    description = localPlaylist.description,
-                    createdAt = Instant.ofEpochMilli(localPlaylist.createdAt).toString(),
-                    last_modified_at = Instant.ofEpochMilli(localPlaylist.createdAt).toString(),
-                    serverId = null, owner = null
-                )
-            }
 
-            syntheticPlaylists + uniqueUserPlaylists + starredAsDisplayable + localAsDisplayable
+
+            syntheticPlaylists + uniqueUserPlaylists + starredAsDisplayable
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000L),

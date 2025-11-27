@@ -6,7 +6,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -14,7 +13,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -36,6 +34,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.holodex.playback.PlaybackRequestManager
 import com.example.holodex.ui.composables.FullPlayerActions
 import com.example.holodex.ui.composables.FullPlayerScreenContent
+import com.example.holodex.ui.composables.MainScreenLayout
 import com.example.holodex.ui.composables.MiniPlayerWithProgressBar
 import com.example.holodex.ui.composables.PlaylistManagementDialogs
 import com.example.holodex.ui.navigation.AppDestinations
@@ -118,20 +117,15 @@ fun MainScreenScaffold(
     }
 
     HolodexMusicTheme(settingsViewModel = settingsViewModel) {
-        Scaffold(
+        MainScreenLayout(
             modifier = Modifier.fillMaxSize(),
-            // FIX 1: Set insets to 0 to let content draw behind system bars
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
-                Log.d(TAG, "bottomBar: Composing")
                 Column {
-                    Log.d(TAG, "bottomBar Column: About to compose MiniPlayer")
+                    // The MiniPlayer logic remains the same
                     MiniPlayerWithProgressBar(
                         playbackViewModel = playbackViewModel,
                         onTapped = { showFullPlayerSheet = true }
                     )
-                    Log.d(TAG, "bottomBar Column: MiniPlayer composed, now composing NavigationBar")
-
                     NavigationBar {
                         val navItems = listOf(
                             BottomNavItem.Discover,
@@ -166,16 +160,17 @@ fun MainScreenScaffold(
                     Log.d(TAG, "bottomBar Column: NavigationBar composed")
                 }
             }
-        ) { innerPadding ->
-            // FIX 2: Do NOT apply innerPadding to the Box.
-            // This allows the background of the screens (HolodexNavHost) to fill the entire screen.
-            // The internal screens (Library, etc.) handle their own content padding for lists.
+        ) { dynamicPadding ->
+            // dynamicPadding now contains the EXACT height of (MiniPlayer + NavBar)
+
             Box(modifier = Modifier.fillMaxSize()) {
                 HolodexNavHost(
                     navController = navController,
                     videoListViewModel = videoListViewModel,
                     playlistManagementViewModel = playlistManagementViewModel,
-                    activity = activity
+                    activity = activity,
+                    // Pass this padding down to your screens!
+                    contentPadding = dynamicPadding
                 )
             }
         }

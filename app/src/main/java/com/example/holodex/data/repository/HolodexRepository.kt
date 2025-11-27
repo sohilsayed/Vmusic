@@ -9,13 +9,10 @@ import com.example.holodex.background.SyncLogger
 import com.example.holodex.data.api.AuthenticatedMusicdexApiService
 import com.example.holodex.data.api.HolodexApiService
 import com.example.holodex.data.api.LatestSongsRequest
-import com.example.holodex.data.api.LikeRequest
-import com.example.holodex.data.api.LikedSongApiDto
 import com.example.holodex.data.api.MusicdexApiService
 import com.example.holodex.data.api.Organization
 import com.example.holodex.data.api.PaginatedChannelsResponse
 import com.example.holodex.data.api.PaginatedSongsResponse
-import com.example.holodex.data.api.PatchOperation
 import com.example.holodex.data.api.PlaylistListResponse
 import com.example.holodex.data.api.PlaylistUpdateRequest
 import com.example.holodex.data.api.StarPlaylistRequest
@@ -29,11 +26,8 @@ import com.example.holodex.data.cache.SearchListCache
 import com.example.holodex.data.db.AppDatabase
 import com.example.holodex.data.db.CachedDiscoveryResponse
 import com.example.holodex.data.db.DiscoveryDao
-import com.example.holodex.data.db.FavoriteChannelDao
-import com.example.holodex.data.db.FavoriteChannelEntity
 import com.example.holodex.data.db.HistoryDao
 import com.example.holodex.data.db.HistoryItemEntity
-import com.example.holodex.data.db.LikedItemDao
 import com.example.holodex.data.db.LikedItemEntity
 import com.example.holodex.data.db.LikedItemType
 import com.example.holodex.data.db.PlaylistDao
@@ -43,10 +37,9 @@ import com.example.holodex.data.db.StarredPlaylistDao
 import com.example.holodex.data.db.StarredPlaylistEntity
 import com.example.holodex.data.db.SyncMetadataDao
 import com.example.holodex.data.db.SyncStatus
+import com.example.holodex.data.db.UnifiedDao
 import com.example.holodex.data.db.VideoDao
 import com.example.holodex.data.db.mappers.toEntity
-import com.example.holodex.data.db.mappers.toFavoriteChannelEntity
-import com.example.holodex.data.db.mappers.toLikedItemEntityShell
 import com.example.holodex.data.db.toEntity
 import com.example.holodex.data.model.HolodexChannelMin
 import com.example.holodex.data.model.HolodexSong
@@ -59,8 +52,10 @@ import com.example.holodex.data.model.discovery.FullPlaylist
 import com.example.holodex.data.model.discovery.MusicdexSong
 import com.example.holodex.data.model.discovery.PlaylistStub
 import com.example.holodex.di.ApplicationScope
+import com.example.holodex.di.DefaultDispatcher
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.util.VideoFilteringUtil
+import com.example.holodex.viewmodel.UnifiedDisplayItem
 import com.example.holodex.viewmodel.VideoListViewModel
 import com.example.holodex.viewmodel.state.BrowseFilterState
 import com.example.holodex.viewmodel.state.SongSegmentFilterMode
@@ -106,15 +101,15 @@ class HolodexRepository @Inject constructor(
     private val browseListCache: BrowseListCache,
     private val searchListCache: SearchListCache,
     private val videoDao: VideoDao,
-    private val likedItemDao: LikedItemDao,
     val playlistDao: PlaylistDao,
     private val appDatabase: AppDatabase,
-    private val defaultDispatcher: CoroutineDispatcher,
+    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher, // Use Qualifier
     private val historyDao: HistoryDao,
-    private val favoriteChannelDao: FavoriteChannelDao,
     internal val syncMetadataDao: SyncMetadataDao,
     private val starredPlaylistDao: StarredPlaylistDao,
     private val tokenManager: TokenManager,
+    private val unifiedDao: UnifiedDao,
+    private val unifiedRepository: UnifiedVideoRepository, // Add here
     @ApplicationScope private val applicationScope: CoroutineScope
 ) {
 
@@ -133,8 +128,8 @@ class HolodexRepository @Inject constructor(
     private val videoDetailMutex = Mutex()
 
     val likedItemIds: StateFlow<Set<String>> =
-        getObservableLikedItems()
-            .map { likedItems -> likedItems.map { it.itemId }.toSet() }
+        unifiedDao.getLikedItemIds() // Uses new DAO
+            .map { it.toSet() }
             .stateIn(
                 scope = applicationScope,
                 started = SharingStarted.WhileSubscribed(5000L),
@@ -522,86 +517,15 @@ class HolodexRepository @Inject constructor(
         }
     }
 
-    suspend fun addLikedSongSegment(video: HolodexVideoItem, song: HolodexSong) =
-        withContext(defaultDispatcher) {
-            // This function now assumes the ViewModel has determined this is a valid, syncable segment.
-            val itemId = LikedItemEntity.generateSongItemId(video.id, song.start)
-
-            // Try to find the serverId. A network call might be needed if not present.
-            val songFromServer = fetchVideoAndFindSong(video.id, song.start)?.second
-            val serverId = songFromServer?.id
-
-            if (serverId == null) {
-                // If it fails, log an error but don't crash. The like will simply not be synced.
-                Timber.e("Could not resolve serverId for song segment to sync like: ${song.name}")
-                return@withContext
-            }
-
-            val entity = LikedItemEntity(
-                itemId = itemId, videoId = video.id, itemType = LikedItemType.SONG_SEGMENT,
-                serverId = serverId, titleSnapshot = song.name.ifBlank { video.title },
-                artistTextSnapshot = song.originalArtist ?: video.channel.name,
-                albumTextSnapshot = video.title, artworkUrlSnapshot = song.artUrl ?: video.channel.photoUrl,
-                descriptionSnapshot = video.description, channelIdSnapshot = video.channel.id ?: "unknown",
-                durationSecSnapshot = (song.end - song.start).toLong().coerceAtLeast(1L),
-                actualSongName = song.name.ifBlank { null }, actualSongArtist = song.originalArtist,
-                actualSongArtworkUrl = song.artUrl, songStartSeconds = song.start,
-                songEndSeconds = song.end, syncStatus = SyncStatus.DIRTY
-            )
-            likedItemDao.insert(entity)
-        }
-
-    suspend fun removeFavoriteChannel(channelId: String) = withContext(defaultDispatcher) {
-        Timber.tag(TAG_SYNC)
-            .d("[FAV_CHANNEL] Optimistic Update: Marking channel $channelId for deletion.")
-        favoriteChannelDao.softDelete(channelId)
-    }
-
-    suspend fun removeLikedItem(itemId: String) = withContext(defaultDispatcher) {
-        Timber.tag("SYNC_DEBUG").i("====== LIKE ACTION (Repository) ======")
-        Timber.tag("SYNC_DEBUG").i("Preparing to mark item for deletion: $itemId")
-        val itemToRemove = likedItemDao.getLikedItem(itemId)
-
-        if (itemToRemove == null) {
-            Timber.tag("SYNC_DEBUG").w("[REMOVE] Item $itemId not found in DB. No action taken.")
-            return@withContext
-        }
-
-
-        Timber.tag("SYNC_DEBUG")
-            .d("[REMOVE] Current status of item $itemId is ${itemToRemove.syncStatus}. Updating to PENDING_DELETE.")
-        likedItemDao.performMarkForDeletion(
-            itemId = itemToRemove.itemId,
-            timestamp = System.currentTimeMillis()
-        )
-    }
-
-    suspend fun addFavoriteChannel(videoItem: HolodexVideoItem) = withContext(defaultDispatcher) {
-        val channel = videoItem.channel
-        if (channel.id == null) return@withContext
-        Timber.tag(TAG_SYNC).d("[FAV_CHANNEL] Optimistic Update: Liking channel ${channel.name}")
-
-        val entity = FavoriteChannelEntity(
-            id = channel.id,
-            name = channel.name,
-            englishName = channel.englishName,
-            photoUrl = channel.photoUrl,
-            org = channel.org,
-            subscriberCount = null,
-            twitter = null,
-            syncStatus = SyncStatus.DIRTY
-        )
-        favoriteChannelDao.insert(entity)
-    }
-
     fun getItemsForPlaylist(playlistId: Long): Flow<List<PlaylistItemEntity>> =
         playlistDao.getItemsForPlaylist(playlistId)
 
-    fun getObservableLikedItems(): Flow<List<LikedItemEntity>> =
-        likedItemDao.getAllLikedItemsSortedByDate()
-
-    fun getObservableLikedSongSegments(): Flow<List<LikedItemEntity>> =
-        likedItemDao.getLikedSongSegmentsSortedByDate()
+    fun getObservableLikedSongSegments(): Flow<List<UnifiedDisplayItem>> { // Return type changes
+        // getFavorites() returns both Videos and Segments. We filter for Segments here.
+        return unifiedRepository.getFavorites().map { unifiedList ->
+            unifiedList.filter { it.isSegment }
+        }
+    }
 
     fun getAllPlaylists(): Flow<List<PlaylistEntity>> = playlistDao.getAllPlaylists()
     suspend fun getLastItemOrderInPlaylist(playlistId: Long): Int? =
@@ -626,14 +550,6 @@ class HolodexRepository @Inject constructor(
         Timber.d("$TAG: Cleaning up expired cache entries.")
         browseListCache.cleanupExpiredEntries()
         searchListCache.cleanupExpiredEntries()
-    }
-
-    fun getFavoritedVideosPaged(
-        offset: Int,
-        limit: Int
-    ): Flow<List<LikedItemEntity>> {
-        Timber.d("$TAG: Fetching paged favorited videos. Offset: $offset, Limit: $limit")
-        return likedItemDao.getLikedItemsByTypePaged(LikedItemType.VIDEO.name, limit, offset)
     }
 
     fun addSongToHistory(item: PlaybackItem) {
@@ -695,13 +611,10 @@ class HolodexRepository @Inject constructor(
         return historyDao.getHistory()
     }
 
-    fun getFavoriteChannels(): Flow<List<FavoriteChannelEntity>> {
-        return favoriteChannelDao.getFavoriteChannels()
+    fun getFavoriteChannelIds(): Flow<List<String>> {
+        return unifiedDao.getFavoriteChannels().map { list -> list.map { it.metadata.id } }
     }
 
-    fun getFavoriteChannelIds(): Flow<List<String>> {
-        return favoriteChannelDao.getFavoriteChannelIds()
-    }
 
     suspend fun getFavoritesFeed(
         channelIds: List<String>,
@@ -1056,126 +969,6 @@ class HolodexRepository @Inject constructor(
         return null
     }
 
-    // --- Likes ---
-    suspend fun performUpstreamLikesSync(logger: SyncLogger) {
-        // --- 1. Process local items marked for deletion ---
-        val pendingDeletes =
-            likedItemDao.getUnsyncedItems().filter { it.syncStatus == SyncStatus.PENDING_DELETE }
-        if (pendingDeletes.isNotEmpty()) {
-            logger.info("  -> Sending ${pendingDeletes.size} delete requests to the server.")
-        }
-
-        for (item in pendingDeletes) {
-            if (item.serverId == null) {
-                // This was liked and unliked before syncing. It's safe to just delete locally now.
-                likedItemDao.deleteByItemId(item.itemId)
-                logger.logItemAction(
-                    LogAction.UPSTREAM_DELETE_SUCCESS,
-                    item.actualSongName,
-                    item.itemId.hashCode().toLong(),
-                    null,
-                    "Local-only item, deleted directly."
-                )
-                continue
-            }
-
-            val response =
-                authenticatedMusicdexApiService.deleteLike(LikeRequest(song_id = item.serverId))
-            if (response.isSuccessful || response.code() == 404) {
-                logger.logItemAction(
-                    LogAction.UPSTREAM_DELETE_SUCCESS,
-                    item.actualSongName,
-                    item.itemId.hashCode().toLong(),
-                    item.serverId,
-                    "DELETE request sent successfully."
-                )
-            } else {
-                logger.logItemAction(
-                    LogAction.UPSTREAM_DELETE_FAILED,
-                    item.actualSongName,
-                    item.itemId.hashCode().toLong(),
-                    item.serverId,
-                    "DELETE request failed: ${response.code()}."
-                )
-            }
-        }
-
-        // --- 2. Process local items that were newly liked ---
-        val dirtyItems =
-            likedItemDao.getUnsyncedItems().filter { it.syncStatus == SyncStatus.DIRTY }
-        if (dirtyItems.isNotEmpty()) {
-            logger.info("  -> Sending ${dirtyItems.size} add requests to the server.")
-        }
-
-        for (item in dirtyItems) {
-            if (item.serverId == null) {
-                logger.logItemAction(
-                    LogAction.UPSTREAM_UPSERT_FAILED,
-                    item.actualSongName,
-                    item.itemId.hashCode().toLong(),
-                    null,
-                    "Cannot sync, serverId is null."
-                )
-                continue
-            }
-
-            val response =
-                authenticatedMusicdexApiService.addLike(LikeRequest(song_id = item.serverId))
-            if (response.isSuccessful) {
-                logger.logItemAction(
-                    LogAction.UPSTREAM_UPSERT_SUCCESS,
-                    item.actualSongName,
-                    item.itemId.hashCode().toLong(),
-                    item.serverId,
-                    "ADD request sent successfully."
-                )
-            } else {
-                logger.logItemAction(
-                    LogAction.UPSTREAM_UPSERT_FAILED,
-                    item.actualSongName,
-                    item.itemId.hashCode().toLong(),
-                    item.serverId,
-                    "ADD request failed: ${response.code()}."
-                )
-            }
-        }
-    }
-
-    suspend fun getAllLocalLikes(): List<LikedItemEntity> =
-        likedItemDao.getAllLikedItemsOnce()
-
-    suspend fun updateLikesBatch(items: List<LikedItemEntity>) =
-        likedItemDao.insert(items)
-
-    suspend fun deleteLikesBatch(itemIds: List<String>) =
-        itemIds.forEach { likedItemDao.deleteByItemId(it) }
-
-    suspend fun getRemoteLikes(): List<LikedSongApiDto> {
-        val allRemoteLikeDtos = mutableListOf<LikedSongApiDto>()
-        var currentPage = 1
-        var totalPages: Int
-        do {
-            val response = authenticatedMusicdexApiService.getLikes(page = currentPage)
-            if (!response.isSuccessful) throw IOException("Failed to fetch remote likes page $currentPage")
-            val body = response.body()!!
-            allRemoteLikeDtos.addAll(body.content)
-            totalPages = body.page_count
-            currentPage++
-        } while (currentPage <= totalPages)
-        return allRemoteLikeDtos
-    }
-
-    suspend fun insertRemoteLikesAsSynced(remoteLikes: List<LikedSongApiDto>) =
-        likedItemDao.upsert(remoteLikes.map { it.toLikedItemEntityShell() })
-
-    suspend fun getOrphanedDirtyLikes(): List<LikedItemEntity> {
-        return likedItemDao.getOrphanedDirtyItems()
-    }
-
-    suspend fun updateLike(item: LikedItemEntity) {
-        likedItemDao.insert(item)
-    }
-
 
     // --- Playlists ---
     suspend fun getLocalPlaylists(): List<PlaylistEntity> = playlistDao.getAllPlaylistsOnce()
@@ -1461,47 +1254,6 @@ class HolodexRepository @Inject constructor(
     suspend fun getLocalOnlyItemCount(localPlaylistId: Long): Int {
         return playlistDao.getItemsForPlaylist(localPlaylistId).first().count { it.isLocalOnly }
     }
-    // --- Favorite Channels ---
-    suspend fun performUpstreamFavoriteChannelsSync(logger: SyncLogger) {
-        val pendingDeletes = favoriteChannelDao.getPendingDeletionIds()
-        if (pendingDeletes.isNotEmpty()) {
-            val patchRequest = pendingDeletes.map { PatchOperation(op = "remove", channel_id = it) }
-            val response = authenticatedMusicdexApiService.patchFavoriteChannels(patchRequest)
-            if (response.isSuccessful) {
-                logger.info("  -> Successfully sent ${pendingDeletes.size} favorite channel DELETIONS to server.")
-                favoriteChannelDao.deleteSyncedDeletions(pendingDeletes)
-            } else {
-                logger.warning("  -> FAILED to send favorite channel deletions. Code: ${response.code()}")
-            }
-        }
-
-        val dirtyItems = favoriteChannelDao.getDirtyItems()
-        if (dirtyItems.isNotEmpty()) {
-            val patchRequest = dirtyItems.map { PatchOperation(op = "add", channel_id = it.id) }
-            val response = authenticatedMusicdexApiService.patchFavoriteChannels(patchRequest)
-            if (response.isSuccessful) {
-                logger.info("  -> Successfully sent ${dirtyItems.size} favorite channel ADDITIONS to server.")
-                favoriteChannelDao.markAsSynced(dirtyItems.map { it.id })
-            } else {
-                logger.warning("  -> FAILED to send favorite channel additions. Code: ${response.code()}")
-            }
-        }
-    }
-
-    suspend fun getRemoteFavoriteChannels(): List<FavoriteChannelEntity> {
-        val response = holodexApiService.getFavoriteChannels()
-        if (!response.isSuccessful) throw IOException("Failed to fetch remote favorite channels")
-        return response.body()?.map { it.toFavoriteChannelEntity() } ?: emptyList()
-    }
-
-    suspend fun getLocalFavoriteChannels(): List<FavoriteChannelEntity> =
-        favoriteChannelDao.getFavoriteChannels().first()
-
-    suspend fun insertNewSyncedFavoriteChannels(channels: List<FavoriteChannelEntity>) =
-        favoriteChannelDao.upsert(channels.map { it.copy(syncStatus = SyncStatus.SYNCED) })
-
-    suspend fun deleteLocalFavoriteChannels(channelIds: List<String>) =
-        channelIds.forEach { favoriteChannelDao.softDelete(it) } // Using soft delete is safer
 
     // --- Starred Playlists ---
     suspend fun performUpstreamStarredPlaylistsSync(logger: SyncLogger) {

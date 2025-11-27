@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -56,7 +57,7 @@ import androidx.navigation.NavController
 import com.example.holodex.R
 import com.example.holodex.ui.dialogs.AddExternalChannelDialog
 import com.example.holodex.ui.navigation.AppDestinations
-import com.example.holodex.viewmodel.ExternalChannelViewModel
+import com.example.holodex.viewmodel.AddChannelViewModel
 import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import kotlinx.coroutines.launch
 
@@ -71,16 +72,17 @@ private enum class LibraryTab(val titleRes: Int) {
 fun LibraryScreen(
     navController: NavController,
     playlistManagementViewModel: PlaylistManagementViewModel,
+    contentPadding: PaddingValues // NEW PARAMETER
 ) {
     val pagerState = rememberPagerState(initialPage = 1, pageCount = { LibraryTab.entries.size })
     val coroutineScope = rememberCoroutineScope()
     var isGridView by remember { mutableStateOf(false) }
 
-    val externalChannelViewModel: ExternalChannelViewModel = hiltViewModel()
-    val showAddChannelDialog by externalChannelViewModel.showDialog.collectAsStateWithLifecycle()
+    val addChannelViewModel: AddChannelViewModel = hiltViewModel()
+    val showAddChannelDialog by addChannelViewModel.showDialog.collectAsStateWithLifecycle()
 
     if (showAddChannelDialog) {
-        AddExternalChannelDialog(onDismissRequest = { externalChannelViewModel.closeDialog() })
+        AddExternalChannelDialog(onDismissRequest = { addChannelViewModel.closeDialog() })
     }
 
     Scaffold(
@@ -91,15 +93,26 @@ fun LibraryScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { externalChannelViewModel.openDialog() }) {
+            FloatingActionButton(
+                onClick = { addChannelViewModel.openDialog() },
+                // Adjust FAB padding
+                modifier = Modifier.padding(bottom = contentPadding.calculateBottomPadding())
+            ) {
                 Icon(Icons.Default.Add, contentDescription = "Add External Channel")
             }
         }
-    ) { paddingValues ->
+    ) { innerPadding ->
+
+        // Combine padding
+        val unifiedPadding = PaddingValues(
+            top = innerPadding.calculateTopPadding(),
+            bottom = contentPadding.calculateBottomPadding() + 16.dp
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(top = unifiedPadding.calculateTopPadding()) // Only top here
         ) {
             AnimatedCustomTabRow(
                 selectedTabIndex = pagerState.currentPage,
@@ -115,8 +128,10 @@ fun LibraryScreen(
                     LibraryTab.FAVORITES -> FavoritesTab(
                         isGridView = isGridView,
                         navController = navController,
-                        playlistManagementViewModel = playlistManagementViewModel
+                        playlistManagementViewModel = playlistManagementViewModel,
+                        contentPadding = PaddingValues(bottom = unifiedPadding.calculateBottomPadding())
                     )
+
                     LibraryTab.PLAYLISTS -> PlaylistsTab(
                         onPlaylistClicked = { playlist ->
                             val idToNavigate = when {
@@ -125,13 +140,20 @@ fun LibraryScreen(
                                 else -> playlist.serverId
                             }
                             if (!idToNavigate.isNullOrBlank()) {
-                                navController.navigate(AppDestinations.playlistDetailsRoute(idToNavigate))
+                                navController.navigate(
+                                    AppDestinations.playlistDetailsRoute(
+                                        idToNavigate
+                                    )
+                                )
                             }
-                        }
+                        },
+                        contentPadding = PaddingValues(bottom = unifiedPadding.calculateBottomPadding())
                     )
+
                     LibraryTab.HISTORY -> HistoryTab(
                         navController = navController,
-                        playlistManagementViewModel = playlistManagementViewModel
+                        playlistManagementViewModel = playlistManagementViewModel,
+                        contentPadding = PaddingValues(bottom = unifiedPadding.calculateBottomPadding())
                     )
                 }
             }
@@ -248,17 +270,26 @@ private fun AnimatedTab(
         shape = RoundedCornerShape(24.dp)
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-            Text(text = title, color = animatedColor, style = MaterialTheme.typography.titleSmall, fontWeight = animatedFontWeight)
+            Text(
+                text = title,
+                color = animatedColor,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = animatedFontWeight
+            )
         }
     }
 }
 
 @Composable
-private fun PlaylistsTab(onPlaylistClicked: (com.example.holodex.data.db.PlaylistEntity) -> Unit) {
+private fun PlaylistsTab(
+    onPlaylistClicked: (com.example.holodex.data.db.PlaylistEntity) -> Unit,
+    contentPadding: PaddingValues
+) {
     PlaylistsScreen(
         modifier = Modifier.fillMaxSize(),
         playlistManagementViewModel = hiltViewModel(),
-        onPlaylistClicked = onPlaylistClicked
+        onPlaylistClicked = onPlaylistClicked,
+        contentPadding = contentPadding
     )
 }
 
@@ -266,7 +297,8 @@ private fun PlaylistsTab(onPlaylistClicked: (com.example.holodex.data.db.Playlis
 private fun FavoritesTab(
     isGridView: Boolean,
     navController: NavController,
-    playlistManagementViewModel: PlaylistManagementViewModel
+    playlistManagementViewModel: PlaylistManagementViewModel,
+    contentPadding: PaddingValues
 ) {
     FavoritesScreen(
         isGridView = isGridView,
@@ -274,20 +306,23 @@ private fun FavoritesTab(
         videoListViewModel = hiltViewModel(),
         favoritesViewModel = hiltViewModel(),
         playlistManagementViewModel = playlistManagementViewModel,
-        navController = navController
+        navController = navController,
+        contentPadding = contentPadding // PASS IT
     )
 }
 
 @Composable
 private fun HistoryTab(
     navController: NavController,
-    playlistManagementViewModel: PlaylistManagementViewModel
+    playlistManagementViewModel: PlaylistManagementViewModel,
+    contentPadding: PaddingValues
 ) {
     HistoryScreen(
         modifier = Modifier.fillMaxSize(),
         navController = navController,
         videoListViewModel = hiltViewModel(),
         favoritesViewModel = hiltViewModel(),
-        playlistManagementViewModel = playlistManagementViewModel
+        playlistManagementViewModel = playlistManagementViewModel,
+        contentPadding = contentPadding // PASS IT
     )
 }
