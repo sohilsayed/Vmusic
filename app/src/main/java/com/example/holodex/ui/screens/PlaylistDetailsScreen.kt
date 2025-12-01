@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -55,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -93,14 +96,13 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 fun PlaylistDetailsScreen(
     navController: NavController,
     onNavigateUp: () -> Unit,
-    playlistManagementViewModel: PlaylistManagementViewModel
+    playlistManagementViewModel: PlaylistManagementViewModel,
+    contentPadding: PaddingValues = PaddingValues(0.dp) // NEW PARAMETER
 ) {
     val playlistDetailsViewModel: PlaylistDetailsViewModel = hiltViewModel()
-
-    // --- ORBIT STATE COLLECTION ---
     val state by playlistDetailsViewModel.collectAsState()
 
-    // Derived variables for cleaner usage
+    // ... (Derived variables remain same) ...
     val playlistDetails = state.playlist
     val items = state.items
     val isEditMode = state.isEditMode
@@ -126,7 +128,6 @@ fun PlaylistDetailsScreen(
         }
     }
 
-    // --- ORBIT SIDE EFFECTS ---
     playlistDetailsViewModel.collectSideEffect { effect ->
         when (effect) {
             is PlaylistDetailsSideEffect.ShowToast -> {
@@ -147,37 +148,25 @@ fun PlaylistDetailsScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
+            // ... (TopAppBar remains same) ...
             TopAppBar(
                 title = {
                     if (!isEditMode) {
-                        Text(
-                            text = playlistDetails?.name ?: "",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Text(text = playlistDetails?.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateUp) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back)
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 actions = {
                     if (isEditMode) {
-                        IconButton(onClick = { playlistDetailsViewModel.cancelEditMode() }) {
-                            Icon(Icons.Default.Cancel, contentDescription = "Cancel Edit")
-                        }
-                        IconButton(onClick = { playlistDetailsViewModel.saveChanges() }) {
-                            Icon(Icons.Default.Check, contentDescription = "Save Changes")
-                        }
+                        IconButton(onClick = { playlistDetailsViewModel.cancelEditMode() }) { Icon(Icons.Default.Cancel, "Cancel") }
+                        IconButton(onClick = { playlistDetailsViewModel.saveChanges() }) { Icon(Icons.Default.Check, "Save") }
                     } else {
                         if (isPlaylistOwned) {
-                            IconButton(onClick = { playlistDetailsViewModel.enterEditMode() }) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit Playlist")
-                            }
+                            IconButton(onClick = { playlistDetailsViewModel.enterEditMode() }) { Icon(Icons.Default.Edit, "Edit") }
                         }
                         IconButton(onClick = { playlistDetailsViewModel.togglePlaylistShuffleMode() }) {
                             Icon(
@@ -198,27 +187,19 @@ fun PlaylistDetailsScreen(
         }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
-            SimpleProcessedBackground(
-                artworkUri = backgroundImageUrl,
-                dynamicColor = dynamicTheme.primary
-            )
+            SimpleProcessedBackground(artworkUri = backgroundImageUrl, dynamicColor = dynamicTheme.primary)
             CompositionLocalProvider(LocalContentColor provides dynamicTheme.onPrimary) {
+                // Apply top padding from Scaffold (TopAppBar)
                 Box(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
                     when {
                         state.isLoading && items.isEmpty() -> {
                             LoadingState(message = stringResource(R.string.loading_content_message))
                         }
                         state.error != null && items.isEmpty() -> {
-                            ErrorStateWithRetry(
-                                message = state.error!!,
-                                onRetry = { playlistDetailsViewModel.loadPlaylistDetails() }
-                            )
+                            ErrorStateWithRetry(message = state.error!!, onRetry = { playlistDetailsViewModel.loadPlaylistDetails() })
                         }
                         items.isEmpty() && !state.isLoading -> {
-                            EmptyState(
-                                message = stringResource(R.string.message_playlist_is_empty),
-                                onRefresh = { playlistDetailsViewModel.loadPlaylistDetails() }
-                            )
+                            EmptyState(message = stringResource(R.string.message_playlist_is_empty), onRefresh = { playlistDetailsViewModel.loadPlaylistDetails() })
                         }
                         else -> {
                             PlaylistContent(
@@ -230,7 +211,9 @@ fun PlaylistDetailsScreen(
                                 favoritesViewModel = favoritesViewModel,
                                 playlistManagementViewModel = playlistManagementViewModel,
                                 playlistDetailsViewModel = playlistDetailsViewModel,
-                                dynamicTheme = dynamicTheme
+                                dynamicTheme = dynamicTheme,
+                                // PASS THE PADDING HERE
+                                contentPadding = contentPadding
                             )
                         }
                     }
@@ -251,17 +234,29 @@ private fun PlaylistContent(
     favoritesViewModel: FavoritesViewModel,
     playlistManagementViewModel: PlaylistManagementViewModel,
     playlistDetailsViewModel: PlaylistDetailsViewModel,
-    dynamicTheme: DynamicTheme
+    dynamicTheme: DynamicTheme,
+    contentPadding: PaddingValues // NEW PARAMETER
 ) {
     val lazyListState = rememberLazyListState()
     val reorderableState = rememberReorderableLazyListState(
         lazyListState = lazyListState,
-        onMove = { from, to ->
-            playlistDetailsViewModel.reorderItemInEditMode(from.index, to.index)
-        }
+        onMove = { from, to -> playlistDetailsViewModel.reorderItemInEditMode(from.index, to.index) }
     )
 
-    LazyColumn(state = lazyListState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
+    // Calculate actual bottom padding: passed padding + extra space
+    val layoutDirection = LocalLayoutDirection.current
+    val effectivePadding = PaddingValues(
+        bottom = contentPadding.calculateBottomPadding() + 16.dp, // Add extra space at bottom
+        top = 0.dp,
+        start = contentPadding.calculateStartPadding(layoutDirection),
+        end = contentPadding.calculateEndPadding(layoutDirection)
+    )
+
+    LazyColumn(
+        state = lazyListState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = effectivePadding // Use dynamic padding
+    ) {
         item {
             if (isEditMode && playlistDetails != null) {
                 EditablePlaylistHeader(

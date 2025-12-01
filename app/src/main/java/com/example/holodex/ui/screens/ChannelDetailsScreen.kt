@@ -146,7 +146,25 @@ fun ChannelDetailsScreen(
                                 )
                             }
                         }
-
+                        if (state.isExternal && state.externalMusicItems.isNotEmpty()) {
+                            item {
+                                CarouselShelf<UnifiedDisplayItem>(
+                                    title = "Uploads",
+                                    uiState = UiState.Success(state.externalMusicItems),
+                                    actionContent = {
+                                    },
+                                    itemContent = { item ->
+                                        UnifiedGridItem(
+                                            item = item,
+                                            onClick = {
+                                                // Ensure we play it as a video item
+                                                discoveryViewModel.playUnifiedItem(item)
+                                            }
+                                        )
+                                    }
+                                )
+                            }
+                        }
                         // 2. Popular Songs
                         if (state.popularSongs.isNotEmpty()) {
                             item {

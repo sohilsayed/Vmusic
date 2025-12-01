@@ -1,11 +1,10 @@
-// File: java/com/example/holodex/playback/data/source/StreamResolutionCoordinator.kt
 package com.example.holodex.playback.data.source
 
 import androidx.collection.LruCache
 import androidx.media3.common.util.UnstableApi
 import com.example.holodex.data.db.DownloadStatus
-import com.example.holodex.data.db.DownloadedItemDao
-import com.example.holodex.data.db.DownloadedItemEntity
+import com.example.holodex.data.db.UnifiedDao
+import com.example.holodex.data.db.UserInteractionEntity
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.playback.domain.model.StreamDetails
 import com.example.holodex.playback.domain.repository.StreamResolverRepository
@@ -19,7 +18,7 @@ import kotlin.coroutines.coroutineContext
 @UnstableApi
 class StreamResolutionCoordinator(
     private val streamResolverRepository: StreamResolverRepository,
-    private val downloadedItemDao: DownloadedItemDao
+    private val unifiedDao: UnifiedDao // <-- REPLACED DownloadedItemDao
 ) {
     companion object {
         private const val TAG = "StreamResolutionCoord"
@@ -40,18 +39,27 @@ class StreamResolutionCoordinator(
         streamUrlCache.evictAll()
     }
 
+    fun getCachedUrl(videoId: String): String? {
+        return getStreamFromCache(videoId)?.url
+    }
+
     private suspend fun resolveSingleStreamInternal(
         item: PlaybackItem,
-        prewarmedDownloads: Map<String, DownloadedItemEntity>?
+        prewarmedDownloads: Map<String, UserInteractionEntity>? // Type changed
     ): PlaybackItem? {
         if (!item.streamUri.isNullOrBlank()) {
             return item
         }
 
-        val downloadedItem = prewarmedDownloads?.get(item.id) ?: downloadedItemDao.getById(item.id)
-        if (downloadedItem != null && downloadedItem.downloadStatus == DownloadStatus.COMPLETED && !downloadedItem.localFileUri.isNullOrBlank()) {
-            return item.copy(streamUri = downloadedItem.localFileUri)
+        // --- THE FIX ---
+        // Check for download interaction in the unified table
+        val downloadInteraction = prewarmedDownloads?.get(item.id) ?: unifiedDao.getDownloadInteraction(item.id)
+        if (downloadInteraction != null &&
+            downloadInteraction.downloadStatus == DownloadStatus.COMPLETED.name &&
+            !downloadInteraction.localFilePath.isNullOrBlank()) {
+            return item.copy(streamUri = downloadInteraction.localFilePath)
         }
+        // --- END FIX ---
 
         getStreamFromCache(item.videoId)?.let { cachedDetails ->
             return item.copy(streamUri = cachedDetails.url)

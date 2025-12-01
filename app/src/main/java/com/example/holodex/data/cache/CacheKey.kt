@@ -12,12 +12,9 @@ interface CacheKey {
 
 data class BrowseCacheKey(
     val filters: BrowseFilterState,
-    val pageOffset: Int // Using offset as part of the key for paged data
+    val pageOffset: Int
 ) : CacheKey {
     override fun stringKey(): String {
-        // A more stable serialization than default toString() for complex objects in keys.
-        // Using Gson to serialize parts of the filter state.
-        // Ensure BrowseFilterState and its members are GSON-serializable or use specific fields.
         val gson = Gson()
         val filterJson = gson.toJson(mapOf(
             "preset" to filters.selectedViewPreset.name,
@@ -25,9 +22,8 @@ data class BrowseCacheKey(
             "topic" to filters.selectedPrimaryTopic,
             "sortField" to filters.sortField.apiValue,
             "sortOrder" to filters.sortOrder.apiValue,
-            "songSegmentFilter" to filters.songSegmentFilterMode.name,
-            "status" to filters.status, // from selectedViewPreset
-            "maxUpcomingHours" to filters.maxUpcomingHours // from selectedViewPreset
+            "status" to filters.status,
+            "maxUpcomingHours" to filters.maxUpcomingHours
         ))
         return "browse_${filterJson}_offset=$pageOffset"
     }

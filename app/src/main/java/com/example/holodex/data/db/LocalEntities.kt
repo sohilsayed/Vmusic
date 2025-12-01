@@ -2,34 +2,8 @@
 
 package com.example.holodex.data.db
 
-import androidx.room.ColumnInfo
-
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-
-@Entity(tableName = "local_favorites")
-data class LocalFavoriteEntity(
-    @PrimaryKey val itemId: String,
-    val videoId: String,
-    val channelId: String,
-    val title: String,
-    val artistText: String,
-    val artworkUrl: String?,
-    val durationSec: Long,
-    val isSegment: Boolean,
-    val songStartSec: Int?,
-    val songEndSec: Int?
-)
-
-@Entity(tableName = "external_channels")
-data class ExternalChannelEntity(
-    @PrimaryKey val channelId: String,
-    val name: String,
-    val photoUrl: String?,
-    val lastCheckedTimestamp: Long = 0,
-    val status: String = "OK",
-    val errorCount: Int = 0
-)
 
 @Entity(tableName = "local_playlists")
 data class LocalPlaylistEntity(

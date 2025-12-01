@@ -21,27 +21,21 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import com.example.holodex.data.AppPreferenceConstants
-import com.example.holodex.data.db.DownloadedItemDao
-import com.example.holodex.data.repository.DownloadRepository
+import com.example.holodex.data.db.AppDatabase
+import com.example.holodex.data.db.UnifiedDao
 import com.example.holodex.data.repository.HolodexRepository
 import com.example.holodex.data.repository.UserPreferencesRepository
 import com.example.holodex.playback.data.mapper.MediaItemMapper
-import com.example.holodex.playback.data.model.PersistedPlaybackStateDao
-import com.example.holodex.playback.data.persistence.PlaybackStatePersistenceManager
+import com.example.holodex.playback.data.model.PlaybackDao
 import com.example.holodex.playback.data.preload.PreloadConfiguration
 import com.example.holodex.playback.data.preload.PreloadStatusController
-import com.example.holodex.playback.data.queue.PlaybackQueueManager
 import com.example.holodex.playback.data.queue.ShuffleOrderProvider
 import com.example.holodex.playback.data.repository.HolodexStreamResolverRepositoryImpl
-import com.example.holodex.playback.data.repository.Media3PlaybackRepositoryImpl
-import com.example.holodex.playback.data.repository.RoomPlaybackStateRepositoryImpl
 import com.example.holodex.playback.data.source.HolodexResolvingDataSource
 import com.example.holodex.playback.data.source.StreamResolutionCoordinator
-import com.example.holodex.playback.data.tracker.PlaybackProgressTracker
-import com.example.holodex.playback.domain.repository.PlaybackRepository
-import com.example.holodex.playback.domain.repository.PlaybackStateRepository
 import com.example.holodex.playback.domain.repository.StreamResolverRepository
 import com.example.holodex.playback.player.Media3PlayerController
+import com.example.holodex.playback.player.PlaybackController
 import com.example.holodex.viewmodel.autoplay.AutoplayItemProvider
 import com.example.holodex.viewmodel.autoplay.ContinuationManager
 import dagger.Module
@@ -79,12 +73,14 @@ object PlaybackModule {
                 Timber.d("ExoPlayer LoadControl: BALANCED")
                 BufferSettings(20000, 60000, 3000, 5000)
             }
+
             AppPreferenceConstants.BUFFERING_STRATEGY_STABLE -> {
                 Timber.d("ExoPlayer LoadControl: STABLE")
                 BufferSettings(30000, 120000, 7500, 10000)
             }
+
             else -> {
-                Timber.d("ExoPlayer LoadControl: AGGRESSIVE (default)");
+                Timber.d("ExoPlayer LoadControl: AGGRESSIVE (default)")
                 BufferSettings(10000, 60000, 1000, 2500)
             }
         }
@@ -102,7 +98,11 @@ object PlaybackModule {
 
     @Provides
     @Singleton
-    fun provideExoPlayer(@ApplicationContext context: Context, loadControl: DefaultLoadControl, mediaSourceFactory: DefaultMediaSourceFactory): ExoPlayer {
+    fun provideExoPlayer(
+        @ApplicationContext context: Context,
+        loadControl: DefaultLoadControl,
+        mediaSourceFactory: DefaultMediaSourceFactory
+    ): ExoPlayer {
         return ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
@@ -120,7 +120,8 @@ object PlaybackModule {
         @DownloadCache downloadCache: SimpleCache
     ): DownloadManager {
         val databaseProvider = StandaloneDatabaseProvider(context)
-        val downloadManagerDataSourceFactory = DefaultHttpDataSource.Factory().setUserAgent("HolodexAppDownloader/1.0")
+        val downloadManagerDataSourceFactory =
+            DefaultHttpDataSource.Factory().setUserAgent("HolodexAppDownloader/1.0")
         return DownloadManager(
             context,
             databaseProvider,
@@ -173,13 +174,16 @@ object PlaybackModule {
                         return when (dataSpec.uri.scheme) {
                             "cache" -> {
                                 Timber.d("DataSource: Routing 'cache://' to download cache. Key: ${dataSpec.uri.authority}")
-                                val newSpec = dataSpec.buildUpon().setKey(dataSpec.uri.authority).build()
+                                val newSpec =
+                                    dataSpec.buildUpon().setKey(dataSpec.uri.authority).build()
                                 downloadCacheDataSource.open(newSpec)
                             }
+
                             "placeholder" -> {
                                 Timber.d("DataSource: Intercepting 'placeholder://' URI. Returning 0.")
                                 0
                             }
+
                             else -> {
                                 // Pass 'holodex://', 'http', 'https', 'file' etc. to the resolving source.
                                 // The resolving source will check if it needs to modify the URI, then pass it down.
@@ -195,7 +199,10 @@ object PlaybackModule {
 
     @Provides
     @Singleton
-    fun provideDefaultMediaSourceFactory(@ApplicationContext context: Context, dataSourceFactory: DataSource.Factory): DefaultMediaSourceFactory {
+    fun provideDefaultMediaSourceFactory(
+        @ApplicationContext context: Context,
+        dataSourceFactory: DataSource.Factory
+    ): DefaultMediaSourceFactory {
         return DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory)
     }
 
@@ -223,11 +230,6 @@ object PlaybackModule {
         return Media3PlayerController(exoPlayer, preloadManager)
     }
 
-    @Provides
-    @Singleton
-    fun providePlaybackStateRepository(dao: PersistedPlaybackStateDao): PlaybackStateRepository {
-        return RoomPlaybackStateRepositoryImpl(dao)
-    }
 
     @Provides
     @Singleton
@@ -237,73 +239,15 @@ object PlaybackModule {
 
     @Provides
     @Singleton
-    fun providePlaybackRepository(
-        playerController: Media3PlayerController,
-        queueManager: PlaybackQueueManager,
-        streamResolver: StreamResolutionCoordinator,
-        progressTracker: PlaybackProgressTracker,
-        persistenceManager: PlaybackStatePersistenceManager,
-        continuationManager: ContinuationManager,
-        mediaItemMapper: MediaItemMapper,
-        downloadRepository: DownloadRepository,
-        holodexRepository: HolodexRepository,
-        userPreferencesRepository: UserPreferencesRepository,
-        @ApplicationScope scope: CoroutineScope
-    ): PlaybackRepository {
-        return Media3PlaybackRepositoryImpl(
-            playerController,
-            queueManager,
-            streamResolver,
-            progressTracker,
-            persistenceManager,
-            continuationManager,
-            mediaItemMapper,
-            downloadRepository,
-            holodexRepository,
-            userPreferencesRepository,
-            scope
-        )
-    }
-
-    @Provides
-    @Singleton
-    fun provideMediaItemMapper(@ApplicationContext context: Context, sharedPreferences: SharedPreferences): MediaItemMapper = MediaItemMapper(context, sharedPreferences)
-
-    @Provides
-    @Singleton
-    fun provideStreamResolutionCoordinator(repo: StreamResolverRepository, dao: DownloadedItemDao): StreamResolutionCoordinator = StreamResolutionCoordinator(repo, dao)
+    fun provideStreamResolutionCoordinator(
+        repo: StreamResolverRepository,
+        unifiedDao: UnifiedDao
+    ): StreamResolutionCoordinator = StreamResolutionCoordinator(repo, unifiedDao)
 
     @Provides
     @Singleton
     fun provideShuffleOrderProvider(): ShuffleOrderProvider = ShuffleOrderProvider()
 
-    @Provides
-    @Singleton
-    fun providePlaybackQueueManager(provider: ShuffleOrderProvider): PlaybackQueueManager =
-        PlaybackQueueManager(provider)
-
-    @Provides
-    @Singleton
-    fun providePlaybackProgressTracker(
-        player: Player,
-        @ApplicationScope scope: CoroutineScope,
-        holodexRepository: HolodexRepository,
-        mediaItemMapper: MediaItemMapper
-    ): PlaybackProgressTracker {
-        return PlaybackProgressTracker(
-            player,
-            scope,
-            holodexRepository,
-            mediaItemMapper
-        )
-    }
-
-    @Provides
-    @Singleton
-    fun providePlaybackStatePersistenceManager(
-        repo: PlaybackStateRepository,
-        @ApplicationScope scope: CoroutineScope
-    ): PlaybackStatePersistenceManager = PlaybackStatePersistenceManager(repo, scope)
 
     @Provides
     @Singleton
@@ -318,7 +262,11 @@ object PlaybackModule {
         userPreferencesRepository: UserPreferencesRepository,
         autoplayItemProvider: AutoplayItemProvider
     ): ContinuationManager {
-        return ContinuationManager(holodexRepository, userPreferencesRepository, autoplayItemProvider)
+        return ContinuationManager(
+            holodexRepository,
+            userPreferencesRepository,
+            autoplayItemProvider
+        )
     }
 
     @Provides
@@ -326,14 +274,30 @@ object PlaybackModule {
     fun providePreloadConfig(): PreloadConfiguration = PreloadConfiguration()
 
     @Provides
+    fun providePlaybackDao(db: AppDatabase): PlaybackDao = db.playbackDao()
+
+    @Provides
     @Singleton
-    fun providePreloadStatusController(
-        queueManager: PlaybackQueueManager,
-        config: PreloadConfiguration
-    ): PreloadStatusController {
-        return PreloadStatusController(
-            getCurrentIndex = { queueManager.playbackQueueFlow.value.currentIndex },
-            preloadDurationMs = config.preloadDurationMs
+    fun providePlaybackController(
+        exoPlayer: ExoPlayer,
+        playbackDao: PlaybackDao,
+        unifiedDao: UnifiedDao,
+        mapper: MediaItemMapper,
+        @ApplicationScope scope: CoroutineScope,
+        continuationManager: ContinuationManager
+    ): PlaybackController {
+        return PlaybackController(
+            exoPlayer, playbackDao, unifiedDao, mapper, continuationManager, scope
         )
     }
+
+    @Provides
+    @Singleton
+    fun provideMediaItemMapper(
+        @ApplicationContext context: Context,
+        sharedPreferences: SharedPreferences
+    ): MediaItemMapper {
+        return MediaItemMapper(context, sharedPreferences)
+    }
+
 }

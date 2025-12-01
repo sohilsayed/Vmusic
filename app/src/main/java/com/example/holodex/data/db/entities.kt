@@ -12,15 +12,7 @@ import com.example.holodex.data.model.HolodexChannelMin
 import com.example.holodex.data.model.HolodexSong
 import com.example.holodex.data.model.HolodexVideoItem
 import timber.log.Timber
-enum class SyncStatus {
-    /** The item's state is consistent with the server's. */
-    SYNCED,
-    /** The item was created or modified locally and needs to be uploaded. */
-    DIRTY,
-    /** The item was deleted locally and needs to be deleted from the server. */
-    PENDING_DELETE,
 
-}
 
 @Entity(tableName = "videos")
 data class CachedVideoEntity(
@@ -168,89 +160,9 @@ data class VideoWithSongs(
 }
 
 
-enum class DownloadStatus {
-    NOT_DOWNLOADED,
-    ENQUEUED,
-    DOWNLOADING,
-    COMPLETED,
-    FAILED,
-    PROCESSING,
-    EXPORT_FAILED,
-    PAUSED,
-    DELETING
-}
 
-@Entity(tableName = "downloaded_items")
-data class DownloadedItemEntity(
-    @PrimaryKey val videoId: String,
 
-    // Metadata snapshot
-    val title: String,
-    val artistText: String,
-    val channelId: String,
-    val artworkUrl: String?,
-    val durationSec: Long,
 
-    // Download-specific info
-    val localFileUri: String?,
-    val downloadStatus: DownloadStatus,
-    val downloadedAt: Long?,
-
-    val fileName: String,
-    val targetFormat: String, // Will store "M4A" or "OGG"
-
-    // WorkManager's ID is a UUID string
-    val downloadId: String?,
-
-    // Progress field is useful for the UI
-    val progress: Int = 0,
-    @ColumnInfo(name = "track_number")
-    val trackNumber: Int? = null
-)
-
-enum class LikedItemType {
-    VIDEO,
-    SONG_SEGMENT
-}
-
-@Entity(tableName = "liked_items")
-data class LikedItemEntity(
-    @PrimaryKey val itemId: String,
-    val videoId: String,
-    @ColumnInfo(name = "item_type", defaultValue = "VIDEO")
-    val itemType: LikedItemType,
-    @ColumnInfo(name = "server_id")
-    val serverId: String?, // The UUID from the server
-    // General snapshot fields (populated for both types)
-    @ColumnInfo(name = "title_snapshot") val titleSnapshot: String,
-    @ColumnInfo(name = "artist_text_snapshot") val artistTextSnapshot: String,
-    @ColumnInfo(name = "album_text_snapshot") val albumTextSnapshot: String?,
-    @ColumnInfo(name = "artwork_url_snapshot") val artworkUrlSnapshot: String?,
-    @ColumnInfo(name = "description_snapshot") val descriptionSnapshot: String?,
-    @ColumnInfo(name = "channel_id_snapshot") val channelIdSnapshot: String,
-    @ColumnInfo(name = "duration_sec_snapshot") val durationSecSnapshot: Long,
-
-    // Fields specific to SONG_SEGMENT (nullable if itemType is VIDEO)
-    @ColumnInfo(name = "actual_song_name") val actualSongName: String? = null,      // Explicit name of the song segment
-    @ColumnInfo(name = "actual_song_artist") val actualSongArtist: String? = null, // E.g., Original artist
-    @ColumnInfo(name = "actual_song_artwork_url") val actualSongArtworkUrl: String? = null, // Specific artwork
-
-    @ColumnInfo(name = "song_start_seconds") val songStartSeconds: Int? = null,
-    @ColumnInfo(name = "song_end_seconds") val songEndSeconds: Int? = null,
-
-    @ColumnInfo(name = "liked_at") val likedAt: Long = System.currentTimeMillis(),
-    @ColumnInfo(name = "last_modified_at", defaultValue = "0")
-    val lastModifiedAt: Long = System.currentTimeMillis(),
-
-    @ColumnInfo(name = "sync_status", defaultValue = "'DIRTY'")
-    var syncStatus: SyncStatus = SyncStatus.DIRTY
-) {
-    companion object {
-        fun generateVideoItemId(videoId: String): String = videoId
-        fun generateSongItemId(videoId: String, songStartSeconds: Int): String =
-            "${videoId}_${songStartSeconds}"
-    }
-}
 
 
 // --- START REPLACEMENT ---
@@ -330,45 +242,8 @@ data class PlaylistItemEntity(
     var syncStatus: SyncStatus = SyncStatus.DIRTY
 )
 
-@Entity(tableName = "history_items")
-data class HistoryItemEntity(
-    // The primary key is when the item was played.
-    @PrimaryKey
-    val playedAtTimestamp: Long,
 
-    // Core identifiers for local use.
-    @ColumnInfo(index = true)
-    val itemId: String, // Our composite key: "videoId_startTime"
-    val videoId: String,
-    val songStartSeconds: Int,
 
-    // Snapshot of metadata for fast UI display.
-    val title: String,
-    val artistText: String,
-    val artworkUrl: String?,
-    val durationSec: Long,
-    val channelId: String
-
-)
-
-@Entity(tableName = "favorite_channels")
-data class FavoriteChannelEntity(
-    @PrimaryKey
-    val id: String,
-    val name: String?,
-    val englishName: String?,
-    @ColumnInfo(name = "photo")
-    val photoUrl: String?,
-    val org: String?,
-    val subscriberCount: Int?,
-    val twitter: String?,
-    @ColumnInfo(name = "favorited_at_timestamp", defaultValue = "0")
-    val favoritedAtTimestamp: Long = System.currentTimeMillis(),
-    @ColumnInfo(name = "is_deleted", defaultValue = "0")
-    val isDeleted: Boolean = false,
-    @ColumnInfo(name = "sync_status", defaultValue = "'DIRTY'")
-    val syncStatus: SyncStatus = SyncStatus.DIRTY
-)
 @Entity(tableName = "sync_metadata")
 data class SyncMetadataEntity(
     @PrimaryKey val dataType: String, // e.g., "likes", "history"

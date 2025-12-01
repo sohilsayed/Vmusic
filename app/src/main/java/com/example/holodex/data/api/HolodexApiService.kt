@@ -55,7 +55,14 @@ interface HolodexApiService {
         @Query("lang") lang: String = "en",
         @Query("c") comments: String? = null
     ): Response<HolodexVideoItem>
-
+    @GET("api/v2/videos")
+    suspend fun getChannelVideos(
+        @Query("channel_id") channelId: String,
+        @Query("type") type: String = "stream",
+        @Query("include") include: String = "live_info",
+        @Query("limit") limit: Int = 10,
+        @Query("status") status: String? = null
+    ): Response<List<HolodexVideoItem>>
     @POST("api/v2/search/videoSearch")
     suspend fun searchVideosAdvanced(
         @Body request: VideoSearchRequest

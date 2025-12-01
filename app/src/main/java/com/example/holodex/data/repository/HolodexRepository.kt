@@ -26,9 +26,6 @@ import com.example.holodex.data.cache.SearchListCache
 import com.example.holodex.data.db.AppDatabase
 import com.example.holodex.data.db.CachedDiscoveryResponse
 import com.example.holodex.data.db.DiscoveryDao
-import com.example.holodex.data.db.HistoryDao
-import com.example.holodex.data.db.HistoryItemEntity
-import com.example.holodex.data.db.LikedItemEntity
 import com.example.holodex.data.db.LikedItemType
 import com.example.holodex.data.db.PlaylistDao
 import com.example.holodex.data.db.PlaylistEntity
@@ -53,12 +50,10 @@ import com.example.holodex.data.model.discovery.MusicdexSong
 import com.example.holodex.data.model.discovery.PlaylistStub
 import com.example.holodex.di.ApplicationScope
 import com.example.holodex.di.DefaultDispatcher
-import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.util.VideoFilteringUtil
 import com.example.holodex.viewmodel.UnifiedDisplayItem
 import com.example.holodex.viewmodel.VideoListViewModel
 import com.example.holodex.viewmodel.state.BrowseFilterState
-import com.example.holodex.viewmodel.state.SongSegmentFilterMode
 import com.example.holodex.viewmodel.state.ViewTypePreset
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -77,6 +72,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -104,7 +100,6 @@ class HolodexRepository @Inject constructor(
     val playlistDao: PlaylistDao,
     private val appDatabase: AppDatabase,
     @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher, // Use Qualifier
-    private val historyDao: HistoryDao,
     internal val syncMetadataDao: SyncMetadataDao,
     private val starredPlaylistDao: StarredPlaylistDao,
     private val tokenManager: TokenManager,
@@ -250,13 +245,11 @@ class HolodexRepository @Inject constructor(
 
     private suspend fun fetchBrowseFromNetwork(key: BrowseCacheKey): Result<FetcherResult<HolodexVideoItem>> {
         return browseNetworkMutex.withLock {
-            Timber.d("$TAG: Fetching BROWSE from network: Key=${key.stringKey()}")
             try {
                 val apiRequest = VideoSearchRequest(
                     sort = key.filters.sortField.apiValue,
                     target = listOf("stream", "clip"),
-                    topic = key.filters.selectedPrimaryTopic?.let { listOf(it) }
-                        ?: DEFAULT_MUSIC_TOPICS,
+                    topic = key.filters.selectedPrimaryTopic?.let { listOf(it) } ?: DEFAULT_MUSIC_TOPICS,
                     org = key.filters.selectedOrganization?.let { listOf(it) },
                     paginated = true,
                     offset = key.pageOffset,
@@ -264,49 +257,31 @@ class HolodexRepository @Inject constructor(
                 )
                 val response = holodexApiService.searchVideosAdvanced(apiRequest)
                 if (!response.isSuccessful || response.body() == null) {
-                    throw IOException("API Error (Browse) for ${key.filters.currentFilterDisplayName}: ${response.code()} - ${response.message()}")
+                    throw IOException("API Error")
                 }
 
                 val videosFromApi = response.body()!!.items
-                var musicallyRelevantVideos =
-                    videosFromApi.filter { VideoFilteringUtil.isMusicContent(it) }
 
-                if (key.filters.selectedViewPreset == ViewTypePreset.LATEST_STREAMS) {
-                    musicallyRelevantVideos = when (key.filters.songSegmentFilterMode) {
-                        SongSegmentFilterMode.REQUIRE_SONGS -> musicallyRelevantVideos.filter {
-                            (it.songcount ?: 0) > 0 || !it.songs.isNullOrEmpty()
-                        }
-
-                        SongSegmentFilterMode.EXCLUDE_SONGS -> musicallyRelevantVideos.filter { (it.songcount == null || it.songcount == 0) && it.songs.isNullOrEmpty() }
-                        SongSegmentFilterMode.ALL -> musicallyRelevantVideos
-                    }
+                // --- NEW SIMPLIFIED FILTERING LOGIC ---
+                val filteredVideos = videosFromApi.filter { video ->
+                    // Must be music content AND longer than 60 seconds
+                    VideoFilteringUtil.isMusicContent(video) && video.duration > 60
                 }
-                Timber.d(
-                    "$TAG: Browse network fetch successful for ${key.stringKey()}. Items: ${musicallyRelevantVideos.size}, Total API: ${
-                        response.body()?.getTotalAsInt()
-                    }"
-                )
+                // --------------------------------------
+
                 val fetcherResult = FetcherResult(
-                    musicallyRelevantVideos,
+                    filteredVideos,
                     response.body()?.getTotalAsInt(),
-                    key.pageOffset + musicallyRelevantVideos.size
+                    key.pageOffset + filteredVideos.size
                 )
                 browseListCache.store(key, fetcherResult)
                 Result.success(fetcherResult)
             } catch (e: Exception) {
-                Timber.e(
-                    e,
-                    "$TAG: Exception during browse network fetch for key ${key.stringKey()}"
-                )
-                Result.failure(
-                    CacheException.NetworkError(
-                        "Browse network fetch failed for ${key.stringKey()}",
-                        e
-                    )
-                )
+                Result.failure(e)
             }
         }
     }
+
 
     suspend fun fetchSearchList(
         key: SearchCacheKey,
@@ -520,13 +495,6 @@ class HolodexRepository @Inject constructor(
     fun getItemsForPlaylist(playlistId: Long): Flow<List<PlaylistItemEntity>> =
         playlistDao.getItemsForPlaylist(playlistId)
 
-    fun getObservableLikedSongSegments(): Flow<List<UnifiedDisplayItem>> { // Return type changes
-        // getFavorites() returns both Videos and Segments. We filter for Segments here.
-        return unifiedRepository.getFavorites().map { unifiedList ->
-            unifiedList.filter { it.isSegment }
-        }
-    }
-
     fun getAllPlaylists(): Flow<List<PlaylistEntity>> = playlistDao.getAllPlaylists()
     suspend fun getLastItemOrderInPlaylist(playlistId: Long): Int? =
         withContext(defaultDispatcher) { playlistDao.getLastItemOrder(playlistId) }
@@ -552,110 +520,116 @@ class HolodexRepository @Inject constructor(
         searchListCache.cleanupExpiredEntries()
     }
 
-    fun addSongToHistory(item: PlaybackItem) {
-        applicationScope.launch(defaultDispatcher) {
-            // 1. Save to local DB immediately for instant UI update. This part is correct.
-            val historyEntity = HistoryItemEntity(
-                playedAtTimestamp = System.currentTimeMillis(),
-                itemId = item.id,
-                videoId = item.videoId,
-                songStartSeconds = item.clipStartSec?.toInt() ?: 0,
-                title = item.title,
-                artistText = item.artistText,
-                artworkUrl = item.artworkUri,
-                durationSec = item.durationSec,
-                channelId = item.channelId
-            )
-            historyDao.upsert(historyEntity)
-            Timber.tag("HISTORY").d("Saved '${item.title}' to local history cache.")
-
-            // 2. Fire-and-forget the network request using the CORRECT server ID.
-            var songServerId = item.serverUuid
-
-            // 2. Check if the serverUuid is a valid UUID. If not, we need to fetch it.
-            // A simple check is to see if it contains an underscore. A real UUID won't.
-            if (songServerId == null || songServerId.contains("_")) {
-                Timber.tag("HISTORY")
-                    .w("PlaybackItem has a local-style ID ('${item.id}') as its serverUuid. Attempting to fetch the real server UUID.")
-                val songFromApi =
-                    fetchVideoAndFindSong(item.videoId, item.clipStartSec?.toInt() ?: 0)?.second
-                if (songFromApi?.id != null) {
-                    songServerId = songFromApi.id
-                    Timber.tag("HISTORY").i("Successfully fetched real server UUID: $songServerId")
-                }
-            }
-
-            if (songServerId == null) {
-                Timber.tag("HISTORY")
-                    .e("Cannot track song in history: Could not find or resolve a valid serverUuid for item ID ${item.id}.")
-                return@launch
-            }
-
-            try {
-                val response = authenticatedMusicdexApiService.trackSongInHistory(songServerId)
-                if (response.isSuccessful) {
-                    Timber.tag("HISTORY")
-                        .i("Successfully tracked song '${item.title}' (Server ID: $songServerId) in server history.")
-                } else {
-                    Timber.tag("HISTORY")
-                        .w("Failed to track song '$songServerId' in server history. Code: ${response.code()}")
-                }
-            } catch (e: Exception) {
-                Timber.tag("HISTORY")
-                    .e(e, "Network error while tracking song '$songServerId' in history.")
-            }
-        }
-    }
-
-    fun getHistory(): Flow<List<HistoryItemEntity>> {
-        return historyDao.getHistory()
-    }
-
-    fun getFavoriteChannelIds(): Flow<List<String>> {
-        return unifiedDao.getFavoriteChannels().map { list -> list.map { it.metadata.id } }
-    }
-
 
     suspend fun getFavoritesFeed(
-        channelIds: List<String>,
+        channels: List<UnifiedDisplayItem>,
         filters: BrowseFilterState,
         offset: Int
     ): Result<FetcherResult<HolodexVideoItem>> = withContext(defaultDispatcher) {
-        if (channelIds.isEmpty()) {
+
+        Timber.e("========== DEBUG: FAVORITES FEED INPUT ==========")
+        Timber.e("Total Input Channels: ${channels.size}")
+        channels.forEachIndexed { index, item ->
+            // We log the Title and isExternal flag for every channel to identify the culprit
+            Timber.e("[$index] ${item.title} | ID: ${item.playbackItemId} | isExternal: ${item.isExternal}")
+        }
+        Timber.e("=================================================")
+
+        if (channels.isEmpty()) {
             return@withContext Result.success(FetcherResult(emptyList(), 0))
         }
 
         try {
-            // This function now ONLY fetches from the Holodex API for the given IDs.
-            val allVideos = coroutineScope {
-                channelIds.map { channelId ->
-                    async {
-                        val request = VideoSearchRequest(
-                            sort = filters.sortField.apiValue,
-                            vch = listOf(channelId),
-                            topic = filters.selectedPrimaryTopic?.let { listOf(it) }
-                                ?: DEFAULT_MUSIC_TOPICS,
-                            paginated = true,
-                            offset = offset, // Note: offset is less effective here, we'll handle pagination in VM
-                            limit = 15, // Fetch a decent number from each channel
-                            target = listOf("stream", "clip")
-                        )
-                        holodexApiService.searchVideosAdvanced(request).body()?.items ?: emptyList()
+            val holodexChannels = channels.filter { !it.isExternal }.map { it.playbackItemId }
+            val externalChannels = channels.filter { it.isExternal }.map { it.playbackItemId }
+
+            Timber.d("FavoritesFeed: Input -> Holodex IDs: ${holodexChannels.size}, External IDs: ${externalChannels.size}")
+
+            // If Holodex IDs are 0, the Mapper 'isExternal' logic is still the root cause.
+
+            val semaphore = kotlinx.coroutines.sync.Semaphore(10)
+
+            // 1. Fetch Holodex
+            val holodexResults = if (holodexChannels.isNotEmpty()) {
+                coroutineScope {
+                    holodexChannels.map { channelId ->
+                        async {
+                            semaphore.withPermit {
+                                try {
+                                    val request = VideoSearchRequest(
+                                        sort = filters.sortField.apiValue,
+                                        vch = listOf(channelId),
+                                        topic = filters.selectedPrimaryTopic?.let { listOf(it) } ?: DEFAULT_MUSIC_TOPICS,
+                                        paginated = true,
+                                        offset = 0,
+                                        limit = 15,
+                                        target = listOf("stream", "clip")
+                                    )
+                                    val res = holodexApiService.searchVideosAdvanced(request).body()?.items ?: emptyList()
+                                    // Debug log per channel
+                                     Timber.v("Holodex Fetch $channelId: ${res.size} items")
+                                    res
+                                } catch (e: Exception) {
+                                    Timber.e(e, "Failed to fetch Holodex favorites for $channelId")
+                                    emptyList()
+                                }
+                            }
+                        }
+                    }.awaitAll().flatten()
+                }
+            } else emptyList()
+
+            // 2. Fetch External
+            val externalResults = if (externalChannels.isNotEmpty()) {
+                // LIMIT CONCURRENCY FOR NEWPIPE TO 4
+                // NewPipe uses heavy HTML parsing which can cause OOM/Native crashes if run too parallel
+                val externalSemaphore = kotlinx.coroutines.sync.Semaphore(4)
+
+                coroutineScope {
+                    externalChannels.map { extId ->
+                        async {
+                            externalSemaphore.withPermit {
+                                getMusicFromExternalChannel(extId, null).getOrNull()?.data ?: emptyList()
+                            }
+                        }
+                    }.awaitAll().flatten()
+                }
+            } else emptyList()
+
+            Timber.d("FavoritesFeed: Raw Results -> Holodex: ${holodexResults.size}, External: ${externalResults.size}")
+
+            // 3. Merge & Filter
+            val allVideos = holodexResults + externalResults
+
+            // Filter duration > 60s
+            val validVideos = allVideos.filter { it.duration > 60 }
+
+            // 4. Robust Sorting
+            // Parse the 'availableAt' string to Instant/Millis for correct comparison
+            val sortedList = validVideos
+                .distinctBy { it.id }
+                .sortedByDescending { video ->
+                    try {
+                        // Handle ISO 8601 string
+                        if (video.availableAt.isNotEmpty()) {
+                            java.time.Instant.parse(video.availableAt).toEpochMilli()
+                        } else 0L
+                    } catch (e: Exception) {
+                        0L // Fallback for bad dates
                     }
                 }
-            }.flatMap { it.await() }
 
-            val segmentFilteredVideos = when (filters.songSegmentFilterMode) {
-                SongSegmentFilterMode.REQUIRE_SONGS -> allVideos.filter { (it.songcount ?: 0) > 0 }
-                SongSegmentFilterMode.EXCLUDE_SONGS -> allVideos.filter { (it.songcount ?: 0) == 0 }
-                SongSegmentFilterMode.ALL -> allVideos
+            // 5. Paginate
+            val paginatedList = if (sortedList.size > offset) {
+                sortedList.drop(offset).take(DEFAULT_PAGE_SIZE)
+            } else {
+                emptyList()
             }
 
-            // Sorting will now be handled in the ViewModel after merging.
-            val finalList = segmentFilteredVideos.distinctBy { it.id }
+            Result.success(FetcherResult(paginatedList, totalAvailable = null))
 
-            Result.success(FetcherResult(finalList, totalAvailable = null))
         } catch (e: Exception) {
+            Timber.e(e, "Error in getFavoritesFeed")
             Result.failure(e)
         }
     }
@@ -666,7 +640,6 @@ class HolodexRepository @Inject constructor(
     ): Result<FetcherResult<HolodexVideoItem>> {
         val filters = BrowseFilterState.create(
             preset = ViewTypePreset.UPCOMING_STREAMS,
-            songFilterMode = SongSegmentFilterMode.ALL,
             organization = org,
         )
         val key = BrowseCacheKey(filters, offset)
@@ -1144,12 +1117,14 @@ class HolodexRepository @Inject constructor(
                     Timber.w("Skipping playlist song ('${song.name}') because its top-level 'channel_id' is missing.")
                     return@mapIndexedNotNull null
                 }
+
+                // FIX: Manually construct the ID string.
+                // LikedItemEntity.generateSongItemId(song.videoId, song.start) was just this:
+                val compositeId = "${song.videoId}_${song.start}"
+
                 PlaylistItemEntity(
                     playlistOwnerId = localPlaylistId,
-                    itemIdInPlaylist = LikedItemEntity.generateSongItemId(
-                        song.videoId,
-                        song.start
-                    ),
+                    itemIdInPlaylist = compositeId, // <--- Fixed here
                     videoIdForItem = song.videoId,
                     itemTypeInPlaylist = LikedItemType.SONG_SEGMENT,
                     songStartSecondsPlaylist = song.start,
@@ -1388,13 +1363,14 @@ class HolodexRepository @Inject constructor(
         nextPage: org.schabi.newpipe.extractor.Page?
     ): Result<FetcherResult<HolodexVideoItem>> = withContext(defaultDispatcher) {
         try {
+            // ... (Keep existing NewPipe setup code) ...
             val ytService = NewPipe.getService(ServiceList.YouTube.serviceId)
             val channelUrl = "https://www.youtube.com/channel/$channelId"
             val channelExtractor = ytService.getChannelExtractor(channelUrl)
             channelExtractor.fetchPage()
 
             val videosTab = channelExtractor.tabs.firstOrNull { it.getUrl().contains("/videos", ignoreCase = true) }
-                ?: return@withContext Result.failure(Exception("Could not find Videos tab for channel."))
+                ?: return@withContext Result.failure(Exception("Could not find Videos tab"))
 
             val tabExtractor = ytService.getChannelTabExtractor(videosTab)
             val itemsPage = if (nextPage == null) {
@@ -1412,11 +1388,15 @@ class HolodexRepository @Inject constructor(
             val avatarUrl = channelExtractor.avatars.firstOrNull()?.url.orEmpty()
 
             val holodexItems = videos.map { item ->
-                mapStreamInfoItemToHolodexVideoItem(
-                    item, channelId, channelExtractor.name, avatarUrl
-                )
+                mapStreamInfoItemToHolodexVideoItem(item, channelId, channelExtractor.name, avatarUrl)
             }
-            val musicContent = holodexItems.filter { VideoFilteringUtil.isMusicContent(it) }
+
+            // --- NEW FILTERING LOGIC ---
+            // Filter > 60s and Music Content
+            val musicContent = holodexItems.filter {
+                VideoFilteringUtil.isMusicContent(it) && it.duration > 60
+            }
+            // ---------------------------
 
             Result.success(
                 FetcherResult(
@@ -1426,7 +1406,6 @@ class HolodexRepository @Inject constructor(
                 )
             )
         } catch (e: Exception) {
-            Timber.e(e, "Failed to get music from external channel: $channelId")
             Result.failure(e)
         }
     }

@@ -122,7 +122,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     // --- Actions ---
-
+    fun enqueueWork(request: androidx.work.WorkRequest) {
+        workManager.enqueue(request)
+    }
     fun saveApiKey(key: String) = intent {
         val trimmedKey = key.trim()
         if (trimmedKey.isBlank()) {

@@ -95,7 +95,7 @@ fun DownloadsScreen(
                     if (state.items.isNotEmpty()) {
                         TextButton(onClick = { downloadsViewModel.playAllDownloadsShuffled() }) {
                             Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null)
-                            androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.size(ButtonDefaults.IconSpacing))
+                            androidx.compose.foundation.layout.Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                             Text(stringResource(R.string.action_play_all))
                         }
                     }

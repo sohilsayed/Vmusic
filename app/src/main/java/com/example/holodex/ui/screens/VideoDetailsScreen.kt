@@ -1,6 +1,6 @@
 // File: java/com/example/holodex/ui/screens/VideoDetailsScreen.kt
 // File: java/com/example/holodex/ui/screens/VideoDetailsScreen.kt
-@file:kotlin.OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package com.example.holodex.ui.screens
 

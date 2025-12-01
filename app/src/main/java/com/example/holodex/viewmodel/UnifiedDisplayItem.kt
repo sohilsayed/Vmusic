@@ -18,8 +18,9 @@ data class UnifiedDisplayItem(
     val songCount: Int?,
     val isDownloaded: Boolean,
 
+    val downloadStatus: String?, // "DOWNLOADING", "PAUSED", "COMPLETED", "FAILED"
 
-    val downloadStatus: String?, // "DOWNLOADING", "PAUSED", "COMPLETED", etc.
+    val localFilePath: String?,
 
     val isSegment: Boolean,
     val isLiked: Boolean,

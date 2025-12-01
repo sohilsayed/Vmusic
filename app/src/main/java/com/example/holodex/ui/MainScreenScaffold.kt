@@ -16,7 +16,6 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,10 +27,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
-import com.example.holodex.playback.PlaybackRequestManager
 import com.example.holodex.ui.composables.FullPlayerActions
 import com.example.holodex.ui.composables.FullPlayerScreenContent
 import com.example.holodex.ui.composables.MainScreenLayout
@@ -47,7 +46,6 @@ import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import com.example.holodex.viewmodel.SettingsViewModel
 import com.example.holodex.viewmodel.VideoListSideEffect
 import com.example.holodex.viewmodel.VideoListViewModel
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.orbitmvi.orbit.compose.collectSideEffect
 
@@ -59,10 +57,10 @@ private const val TAG = "MainScreenScaffold"
 @Composable
 fun MainScreenScaffold(
     navController: NavHostController,
-    playbackRequestManager: PlaybackRequestManager,
     activity: ComponentActivity,
-    player: Player
+    player: ExoPlayer
 ) {
+
     Log.d(TAG, "MainScreenScaffold: Composing")
 
     val coroutineScope = rememberCoroutineScope()
@@ -92,6 +90,7 @@ fun MainScreenScaffold(
                     is VideoListViewModel.NavigationDestination.VideoDetails -> {
                         navController.navigate(AppDestinations.videoDetailRoute(destination.videoId))
                     }
+
                     is VideoListViewModel.NavigationDestination.HomeScreenWithSearch -> {
                         navController.navigate(AppDestinations.HOME_ROUTE) {
                             popUpTo(navController.graph.startDestinationId) { saveState = true }
@@ -101,20 +100,14 @@ fun MainScreenScaffold(
                     }
                 }
             }
+
             is VideoListSideEffect.ShowToast -> {
                 Toast.makeText(context, sideEffect.message, Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    // Bridge Playback
-    LaunchedEffect(playbackRequestManager) {
-        playbackRequestManager.playbackRequest.collectLatest { request ->
-            (activity as MainActivity).sendPlaybackRequestToService(
-                request.items, request.startIndex, request.startPositionSec, request.shouldShuffle
-            )
-        }
-    }
+
 
     HolodexMusicTheme(settingsViewModel = settingsViewModel) {
         MainScreenLayout(
@@ -141,14 +134,19 @@ fun MainScreenScaffold(
                                 selected = isSelected,
                                 onClick = {
                                     if (item.route == AppDestinations.DISCOVERY_ROUTE &&
-                                        navController.graph.startDestinationId == navController.graph.findNode(AppDestinations.DISCOVERY_ROUTE)?.id) {
+                                        navController.graph.startDestinationId == navController.graph.findNode(
+                                            AppDestinations.DISCOVERY_ROUTE
+                                        )?.id
+                                    ) {
                                         navController.navigate(item.route) {
                                             popUpTo(0) { inclusive = true }
                                             launchSingleTop = true
                                         }
                                     } else {
                                         navController.navigate(item.route) {
-                                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                            popUpTo(navController.graph.findStartDestination().id) {
+                                                saveState = true
+                                            }
                                             launchSingleTop = true
                                             restoreState = true
                                         }
@@ -214,7 +212,12 @@ private fun FullPlayerScreenDestination(
     val videoListViewModel: VideoListViewModel = hiltViewModel()
     val context = LocalContext.current
 
-    val playerActions = remember(playbackViewModel, favoritesViewModel, videoListViewModel, playlistManagementViewModel) {
+    val playerActions = remember(
+        playbackViewModel,
+        favoritesViewModel,
+        videoListViewModel,
+        playlistManagementViewModel
+    ) {
         FullPlayerActions(
             onNavigateUp = onNavigateUp,
             onTogglePlayPause = { playbackViewModel.togglePlayPause() },
@@ -230,10 +233,13 @@ private fun FullPlayerScreenDestination(
             onToggleLike = { playbackItem -> favoritesViewModel.toggleLike(playbackItem) },
             onFindArtist = { channelId -> videoListViewModel.setBrowseContextAndNavigate(channelId = channelId) },
             onOpenAudioSettings = { audioSessionId ->
-                Toast.makeText(context, "Audio FX Session ID: $audioSessionId", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Audio FX Session ID: $audioSessionId", Toast.LENGTH_SHORT)
+                    .show()
             },
             onAddToPlaylist = { playbackItem ->
-                playlistManagementViewModel.prepareItemForPlaylistAdditionFromPlaybackItem(playbackItem)
+                playlistManagementViewModel.prepareItemForPlaylistAdditionFromPlaybackItem(
+                    playbackItem
+                )
             }
         )
     }

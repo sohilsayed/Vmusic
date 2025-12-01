@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/viewmodel/PlaylistManagementViewModel.kt
 package com.example.holodex.viewmodel
 
 import android.app.Application
@@ -8,15 +7,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import com.example.holodex.R
-import com.example.holodex.data.db.DownloadedItemEntity
-import com.example.holodex.data.db.LikedItemEntity
 import com.example.holodex.data.db.LikedItemType
 import com.example.holodex.data.db.PlaylistEntity
 import com.example.holodex.data.db.PlaylistItemEntity
 import com.example.holodex.data.db.StarredPlaylistEntity
+import com.example.holodex.data.db.SyncStatus
 import com.example.holodex.data.model.discovery.PlaylistStub
-import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.util.PlaylistFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -49,7 +47,7 @@ data class PendingPlaylistItemDetails(
 class PlaylistManagementViewModel @Inject constructor(
     private val application: Application,
     private val holodexRepository: HolodexRepository,
-    private val downloadRepository: DownloadRepository
+    private val unifiedRepository: UnifiedVideoRepository
 ) : ViewModel() {
 
     companion object {
@@ -60,7 +58,9 @@ class PlaylistManagementViewModel @Inject constructor(
 
     private val userCreatedPlaylists: Flow<List<PlaylistEntity>> = holodexRepository.getAllPlaylists()
     private val starredPlaylists: Flow<List<StarredPlaylistEntity>> = holodexRepository.getStarredPlaylistsFlow()
-    private val downloadsFlow: Flow<List<DownloadedItemEntity>> = downloadRepository.getAllDownloads()
+
+    // Migration: Use Unified Display Items instead of legacy DownloadedItemEntity
+    private val downloadsFlow: Flow<List<UnifiedDisplayItem>> = unifiedRepository.getDownloads()
 
     val allDisplayablePlaylists: StateFlow<List<PlaylistEntity>> =
         combine(
@@ -71,6 +71,7 @@ class PlaylistManagementViewModel @Inject constructor(
             val syntheticPlaylists = mutableListOf<PlaylistEntity>()
             val now = Instant.now().toString()
 
+            // 1. Synthetic "Liked Segments" Playlist
             syntheticPlaylists.add(
                 PlaylistEntity(
                     playlistId = LIKED_SEGMENTS_PLAYLIST_ID,
@@ -80,7 +81,8 @@ class PlaylistManagementViewModel @Inject constructor(
                 )
             )
 
-            if (downloads.any { it.downloadStatus == com.example.holodex.data.db.DownloadStatus.COMPLETED }) {
+            // 2. Synthetic "Downloads" Playlist (Only if downloads exist)
+            if (downloads.any { it.isDownloaded }) {
                 syntheticPlaylists.add(
                     PlaylistEntity(
                         playlistId = DOWNLOADS_PLAYLIST_ID,
@@ -91,11 +93,13 @@ class PlaylistManagementViewModel @Inject constructor(
                 )
             }
 
+            // 3. Starred Playlists (Merged with User Playlists)
             val starredAsDisplayable = starred.map { starredItem ->
                 val userPlaylistMatch = userPlaylists.find { it.serverId == starredItem.playlistId }
                 if (userPlaylistMatch != null) {
                     userPlaylistMatch
                 } else {
+                    // Generate a temporary negative ID for display stability
                     val uniqueNegativeId = ("starred_${starredItem.playlistId}".hashCode()).absoluteValue * -1L
                     val tempStub = PlaylistStub(
                         id = starredItem.playlistId,
@@ -114,8 +118,6 @@ class PlaylistManagementViewModel @Inject constructor(
             val starredServerIds = starred.map { it.playlistId }.toSet()
             val uniqueUserPlaylists = userPlaylists.filter { it.serverId !in starredServerIds }
 
-
-
             syntheticPlaylists + uniqueUserPlaylists + starredAsDisplayable
         }.stateIn(
             scope = viewModelScope,
@@ -123,6 +125,7 @@ class PlaylistManagementViewModel @Inject constructor(
             initialValue = emptyList()
         )
 
+    // Used for the "Select Playlist" dialog (excludes synthetic lists)
     val userPlaylists: StateFlow<List<PlaylistEntity>> = holodexRepository.getAllPlaylists()
         .stateIn(
             scope = viewModelScope,
@@ -161,7 +164,7 @@ class PlaylistManagementViewModel @Inject constructor(
             artworkForDisplay = item.artworkUrls.firstOrNull(),
             songStartSeconds = item.songStartSec,
             songEndSeconds = item.songEndSec,
-            isExternal = item.isExternal // *** THE FIX: Get the flag from the item itself ***
+            isExternal = item.isExternal
         )
         _showSelectPlaylistDialog.value = true
         Timber.d("$TAG: Preparing item for playlist addition: ${_pendingItemForPlaylist.value}")
@@ -177,10 +180,9 @@ class PlaylistManagementViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // Smart Dispatch: Only mark as DIRTY if the item is NOT external.
                 if (!pendingItem.isExternal) {
                     val updatedPlaylist = playlist.copy(
-                        syncStatus = com.example.holodex.data.db.SyncStatus.DIRTY,
+                        syncStatus = SyncStatus.DIRTY,
                         last_modified_at = Instant.now().toString()
                     )
                     holodexRepository.playlistDao.updatePlaylist(updatedPlaylist)
@@ -191,10 +193,12 @@ class PlaylistManagementViewModel @Inject constructor(
 
                 val playlistItemEntity = PlaylistItemEntity(
                     playlistOwnerId = playlist.playlistId,
+                    // FIX: Construct IDs manually or move helper to PlaylistItemEntity.
+                    // For now, simple manual construction is safest:
                     itemIdInPlaylist = if (pendingItem.itemType == LikedItemType.SONG_SEGMENT && pendingItem.songStartSeconds != null) {
-                        LikedItemEntity.generateSongItemId(pendingItem.videoId, pendingItem.songStartSeconds)
+                        "${pendingItem.videoId}_${pendingItem.songStartSeconds}"
                     } else {
-                        LikedItemEntity.generateVideoItemId(pendingItem.videoId)
+                        pendingItem.videoId
                     },
                     videoIdForItem = pendingItem.videoId,
                     itemTypeInPlaylist = pendingItem.itemType,
@@ -204,7 +208,8 @@ class PlaylistManagementViewModel @Inject constructor(
                     songArtistTextPlaylist = pendingItem.artistForDisplay,
                     songArtworkUrlPlaylist = pendingItem.artworkForDisplay,
                     itemOrder = newOrder,
-                    isLocalOnly = pendingItem.isExternal // CRITICAL: Set the flag here
+                    isLocalOnly = pendingItem.isExternal,
+                    syncStatus = SyncStatus.DIRTY
                 )
 
                 holodexRepository.addPlaylistItem(playlistItemEntity)
@@ -252,7 +257,19 @@ class PlaylistManagementViewModel @Inject constructor(
             }
         }
     }
-
+    fun prepareItemForPlaylistAdditionFromPlaybackItem(item: PlaybackItem) {
+        _pendingItemForPlaylist.value = PendingPlaylistItemDetails(
+            videoId = item.videoId,
+            itemType = if (item.songId != null) LikedItemType.SONG_SEGMENT else LikedItemType.VIDEO,
+            titleForDisplay = item.title,
+            artistForDisplay = item.artistText,
+            artworkForDisplay = item.artworkUri,
+            songStartSeconds = item.clipStartSec?.toInt(),
+            songEndSeconds = item.clipEndSec?.toInt(),
+            isExternal = item.isExternal
+        )
+        _showSelectPlaylistDialog.value = true
+    }
     fun deletePlaylist(playlist: PlaylistEntity) {
         val idToDelete = playlist.playlistId
         // This logic handles starred playlists (negative ID, has serverId) and user playlists (positive ID)
@@ -269,18 +286,5 @@ class PlaylistManagementViewModel @Inject constructor(
                 Toast.makeText(application, "Failed to delete playlist: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
             }
         }
-    }
-    fun prepareItemForPlaylistAdditionFromPlaybackItem(item: PlaybackItem) {
-        _pendingItemForPlaylist.value = PendingPlaylistItemDetails(
-            videoId = item.videoId,
-            itemType = if (item.songId != null) LikedItemType.SONG_SEGMENT else LikedItemType.VIDEO,
-            titleForDisplay = item.title,
-            artistForDisplay = item.artistText,
-            artworkForDisplay = item.artworkUri,
-            songStartSeconds = item.clipStartSec?.toInt(),
-            songEndSeconds = item.clipEndSec?.toInt(),
-            isExternal = item.isExternal
-        )
-        _showSelectPlaylistDialog.value = true
     }
 }

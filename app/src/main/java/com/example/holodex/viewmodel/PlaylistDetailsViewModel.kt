@@ -4,23 +4,17 @@ import android.app.Application
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import com.example.holodex.R
 import com.example.holodex.auth.TokenManager
-import com.example.holodex.data.db.DownloadedItemEntity
-import com.example.holodex.data.db.LikedItemEntity
-import com.example.holodex.data.db.LikedItemType
 import com.example.holodex.data.db.PlaylistEntity
 import com.example.holodex.data.db.PlaylistItemEntity
 import com.example.holodex.data.db.SyncStatus
-import com.example.holodex.data.model.discovery.MusicdexSong
 import com.example.holodex.data.model.discovery.PlaylistStub
-import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.playback.PlaybackRequestManager
-import com.example.holodex.playback.domain.repository.PlaybackRepository
+import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.playback.domain.usecase.AddItemsToQueueUseCase
+import com.example.holodex.playback.player.PlaybackController
 import com.example.holodex.util.ArtworkResolver
 import com.example.holodex.util.DynamicTheme
 import com.example.holodex.util.PaletteExtractor
@@ -29,11 +23,7 @@ import com.example.holodex.viewmodel.mappers.toPlaybackItem
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toVideoShell
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import org.orbitmvi.orbit.Container
 import org.orbitmvi.orbit.ContainerHost
 import org.orbitmvi.orbit.viewmodel.container
@@ -41,16 +31,21 @@ import timber.log.Timber
 import java.time.Instant
 import javax.inject.Inject
 
-// --- State ---
+// --- State Definition ---
 data class PlaylistDetailsState(
     val playlist: PlaylistEntity? = null,
     val items: List<UnifiedDisplayItem> = emptyList(),
-    val rawItems: List<Any> = emptyList(), // Keep raw for editing logic
+    // We keep rawItems to handle editing logic for User Playlists (PlaylistItemEntity)
+    val rawItems: List<Any> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null,
+
+    // Edit Mode State
     val isEditMode: Boolean = false,
     val editablePlaylist: PlaylistEntity? = null,
     val editableItems: List<PlaylistItemEntity> = emptyList(),
+
+    // Context State
     val isPlaylistOwned: Boolean = false,
     val isShuffleActive: Boolean = false,
     val dynamicTheme: DynamicTheme = DynamicTheme.default(Color.Black, Color.White)
@@ -66,10 +61,9 @@ class PlaylistDetailsViewModel @Inject constructor(
     private val application: Application,
     savedStateHandle: SavedStateHandle,
     private val holodexRepository: HolodexRepository,
-    private val downloadRepository: DownloadRepository,
-    private val playbackRequestManager: PlaybackRequestManager,
-    private val playbackRepository: PlaybackRepository,
+    private val unifiedRepository: UnifiedVideoRepository,
     private val addItemsToQueueUseCase: AddItemsToQueueUseCase,
+    private val playbackController: PlaybackController,
     private val paletteExtractor: PaletteExtractor,
     private val tokenManager: TokenManager
 ) : ContainerHost<PlaylistDetailsState, PlaylistDetailsSideEffect>, ViewModel() {
@@ -86,10 +80,7 @@ class PlaylistDetailsViewModel @Inject constructor(
         if (playlistId.isNotBlank()) {
             loadPlaylistDetails()
         } else {
-            // FIX: Wrapped reduce in intent block
-            intent {
-                reduce { state.copy(isLoading = false, error = "Invalid Playlist ID") }
-            }
+            intent { reduce { state.copy(isLoading = false, error = "Invalid Playlist ID") } }
         }
     }
 
@@ -99,43 +90,68 @@ class PlaylistDetailsViewModel @Inject constructor(
 
         try {
             var playlistEntity: PlaylistEntity? = null
+            var unifiedItems: List<UnifiedDisplayItem> = emptyList()
             var rawItemsList: List<Any> = emptyList()
             var artworkUrl: String? = null
 
+            // 1. Fetch global states for mapping
+            val likedIds = unifiedRepository.observeLikedItemIds().first()
+            val downloadedIds = unifiedRepository.observeDownloadedIds().first()
+
             when (playlistId) {
                 LIKED_SEGMENTS_PLAYLIST_ID -> {
-                    rawItemsList = holodexRepository.getObservableLikedSongSegments().first()
+                    // Synthetic: Liked Segments
+                    // We fetch UnifiedItems directly, no mapping needed
+                    val segments = unifiedRepository.getFavorites().first().filter { it.isSegment }
+                    unifiedItems = segments
+                    rawItemsList = segments // No raw entities available/needed here
+
                     playlistEntity = PlaylistEntity(
                         playlistId = LIKED_SEGMENTS_PLAYLIST_ID.toLong(),
                         name = application.getString(R.string.playlist_title_liked_segments),
                         description = application.getString(R.string.playlist_desc_liked_segments),
                         createdAt = now, last_modified_at = now, serverId = null, owner = null
                     )
-                    artworkUrl = (rawItemsList.firstOrNull() as? LikedItemEntity)?.artworkUrlSnapshot
+                    artworkUrl = segments.firstOrNull()?.artworkUrls?.firstOrNull()
                 }
                 DOWNLOADS_PLAYLIST_ID -> {
-                    rawItemsList = downloadRepository.getAllDownloads().first()
+                    // Synthetic: Downloads
+                    val downloads = unifiedRepository.getDownloads().first()
+                    unifiedItems = downloads
+                    rawItemsList = downloads
+
                     playlistEntity = PlaylistEntity(
                         playlistId = DOWNLOADS_PLAYLIST_ID.toLong(),
                         name = application.getString(R.string.playlist_title_downloads),
                         description = application.getString(R.string.playlist_desc_downloads),
                         createdAt = now, last_modified_at = now, serverId = null, owner = null
                     )
-                    artworkUrl = (rawItemsList.firstOrNull() as? DownloadedItemEntity)?.artworkUrl
+                    artworkUrl = downloads.firstOrNull()?.artworkUrls?.firstOrNull()
                 }
                 else -> {
                     val longId = playlistId.toLongOrNull()
+                    // Check if it's a local numeric ID (User Playlist)
                     if (longId != null && longId > 0) {
-                        // Local DB Playlist
+                        // User Playlist (Local DB)
                         playlistEntity = holodexRepository.getPlaylistById(longId)
-                        rawItemsList = holodexRepository.getItemsForPlaylist(longId).first()
-                        artworkUrl = (rawItemsList.firstOrNull() as? PlaylistItemEntity)?.songArtworkUrlPlaylist
+                        val playlistItems = holodexRepository.getItemsForPlaylist(longId).first()
+                        rawItemsList = playlistItems // Keep entities for editing
+
+                        unifiedItems = playlistItems.map { entity ->
+                            entity.toUnifiedDisplayItem(
+                                isDownloaded = downloadedIds.contains(entity.itemIdInPlaylist),
+                                isLiked = likedIds.contains(entity.itemIdInPlaylist)
+                            )
+                        }
+                        artworkUrl = unifiedItems.firstOrNull()?.artworkUrls?.firstOrNull()
                     } else {
-                        // Remote/System Playlist
+                        // Remote/System Playlist (API)
                         val isRadio = playlistId.startsWith(":artist") || playlistId.startsWith(":hot") || playlistId.startsWith(":radio")
                         val result = if (isRadio) holodexRepository.getRadioContent(playlistId) else holodexRepository.getFullPlaylistContent(playlistId)
 
                         val fullPlaylist = result.getOrThrow()
+
+                        // Generate metadata
                         val tempStub = PlaylistStub(
                             id = fullPlaylist.id, title = fullPlaylist.title, type = fullPlaylist.type ?: "",
                             description = fullPlaylist.description, artContext = null
@@ -148,32 +164,29 @@ class PlaylistDetailsViewModel @Inject constructor(
                             createdAt = fullPlaylist.createdAt, last_modified_at = fullPlaylist.updatedAt,
                             serverId = fullPlaylist.id, owner = null
                         )
-                        rawItemsList = fullPlaylist.content ?: emptyList()
-                        artworkUrl = ArtworkResolver.getPlaylistArtworkUrl(tempStub) ?: fullPlaylist.content?.firstOrNull()?.artUrl
+
+                        val apiSongs = fullPlaylist.content ?: emptyList()
+                        rawItemsList = apiSongs
+
+                        unifiedItems = apiSongs.map { song ->
+                            val videoShell = song.toVideoShell(playlistEntity.name ?: "")
+                            // Determine statuses using composite key
+                            val compositeId = "${song.videoId}_${song.start}"
+                            song.toUnifiedDisplayItem(
+                                parentVideo = videoShell,
+                                isLiked = likedIds.contains(compositeId),
+                                isDownloaded = downloadedIds.contains(compositeId)
+                            )
+                        }
+                        artworkUrl = ArtworkResolver.getPlaylistArtworkUrl(tempStub) ?: unifiedItems.firstOrNull()?.artworkUrls?.firstOrNull()
                     }
                 }
             }
 
-            // Calculate Theme
+            // Extract Theme
             val theme = paletteExtractor.extractThemeFromUrl(artworkUrl, DynamicTheme.default(Color.Black, Color.White))
 
-            // Map to Unified Items
-            val likedIds = holodexRepository.likedItemIds.first()
-            val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
-
-            val unifiedItems = rawItemsList.mapNotNull { rawItem ->
-                when (rawItem) {
-                    is PlaylistItemEntity -> rawItem.toUnifiedDisplayItem(downloadedIds.contains(rawItem.itemIdInPlaylist), likedIds.contains(rawItem.itemIdInPlaylist))
-                    is LikedItemEntity -> rawItem.toUnifiedDisplayItem(downloadedIds.contains(rawItem.itemId))
-                    is DownloadedItemEntity -> rawItem.toUnifiedDisplayItem(likedIds.contains(rawItem.videoId))
-                    is MusicdexSong -> {
-                        val videoShell = rawItem.toVideoShell(playlistEntity?.name ?: "")
-                        rawItem.toUnifiedDisplayItem(videoShell, likedIds.contains("${rawItem.videoId}_${rawItem.start}"), downloadedIds.contains("${rawItem.videoId}_${rawItem.start}"))
-                    }
-                    else -> null
-                }
-            }
-
+            // Check Ownership
             val isOwned = playlistEntity?.owner != null && playlistEntity.owner.toString() == tokenManager.getUserId()
 
             reduce {
@@ -200,22 +213,25 @@ class PlaylistDetailsViewModel @Inject constructor(
     fun playAllItemsInPlaylist() = intent {
         val isRadio = playlistId.startsWith(":")
         if (isRadio) {
-            playbackRepository.prepareAndPlayRadio(playlistId)
+            playbackController.loadRadio(playlistId)
         } else {
             if (state.items.isEmpty()) {
                 postSideEffect(PlaylistDetailsSideEffect.ShowToast("Playlist is empty"))
                 return@intent
             }
             val playbackItems = state.items.map { it.toPlaybackItem() }
-            playbackRequestManager.submitPlaybackRequest(playbackItems, 0, shouldShuffle = state.isShuffleActive)
+            playbackController.loadAndPlay(playbackItems, 0)
+            if (state.isShuffleActive) playbackController.toggleShuffle()
         }
     }
 
     fun playFromItem(tappedItem: UnifiedDisplayItem) = intent {
         if (state.items.isEmpty()) return@intent
-        val index = state.items.indexOf(tappedItem).coerceAtLeast(0)
+        val index = state.items.indexOfFirst { it.playbackItemId == tappedItem.playbackItemId }.coerceAtLeast(0)
         val playbackItems = state.items.map { it.toPlaybackItem() }
-        playbackRequestManager.submitPlaybackRequest(playbackItems, index, shouldShuffle = state.isShuffleActive)
+
+        playbackController.loadAndPlay(playbackItems, index)
+        if (state.isShuffleActive) playbackController.toggleShuffle()
     }
 
     fun addAllToQueue() = intent {
@@ -226,10 +242,15 @@ class PlaylistDetailsViewModel @Inject constructor(
         }
     }
 
-    // --- Edit Mode Logic ---
+    // --- Edit Mode Logic (User Playlists Only) ---
 
     fun enterEditMode() = intent {
         val editableList = state.rawItems.filterIsInstance<PlaylistItemEntity>()
+        if (editableList.isEmpty() && state.rawItems.isNotEmpty()) {
+            // Should not happen if isPlaylistOwned check is correct
+            postSideEffect(PlaylistDetailsSideEffect.ShowToast("Cannot edit this type of playlist"))
+            return@intent
+        }
         reduce {
             state.copy(
                 isEditMode = true,
@@ -256,9 +277,12 @@ class PlaylistDetailsViewModel @Inject constructor(
         val item = list.removeAt(from)
         list.add(to, item)
 
-        // Re-map to unified items for display immediately
-        val likedIds = holodexRepository.likedItemIds.first()
-        val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+        // We must re-map the editable list to UnifiedDisplayItems so the UI updates nicely
+        // To avoid re-fetching status, we assume the status in the main 'items' list is still valid,
+        // or we just map naively (status usually doesn't change during reorder).
+        // For simplicity/speed, we'll re-fetch the statuses from the repositories current cache.
+        val likedIds = unifiedRepository.observeLikedItemIds().first()
+        val downloadedIds = unifiedRepository.observeDownloadedIds().first()
 
         val unified = list.map { it.toUnifiedDisplayItem(downloadedIds.contains(it.itemIdInPlaylist), likedIds.contains(it.itemIdInPlaylist)) }
 
@@ -266,10 +290,12 @@ class PlaylistDetailsViewModel @Inject constructor(
     }
 
     fun removeItemInEditMode(item: UnifiedDisplayItem) = intent {
+        // Remove from the Entity list
         val list = state.editableItems.filterNot { it.itemIdInPlaylist == item.playbackItemId }
-        // Re-map
-        val likedIds = holodexRepository.likedItemIds.first()
-        val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+
+        // Re-map to Unified for UI
+        val likedIds = unifiedRepository.observeLikedItemIds().first()
+        val downloadedIds = unifiedRepository.observeDownloadedIds().first()
         val unified = list.map { it.toUnifiedDisplayItem(downloadedIds.contains(it.itemIdInPlaylist), likedIds.contains(it.itemIdInPlaylist)) }
 
         reduce { state.copy(editableItems = list, items = unified) }
@@ -285,7 +311,7 @@ class PlaylistDetailsViewModel @Inject constructor(
             return@intent
         }
 
-        // Calculate diff
+        // Calculate if content changed (simple ID comparison)
         val originalSyncedIds = state.rawItems.filterIsInstance<PlaylistItemEntity>().filter { !it.isLocalOnly }.map { it.itemIdInPlaylist }
         val newSyncedIds = draftItems.filter { !it.isLocalOnly }.map { it.itemIdInPlaylist }
 

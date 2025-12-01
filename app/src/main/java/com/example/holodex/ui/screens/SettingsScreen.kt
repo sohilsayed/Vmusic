@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DocumentScanner
@@ -67,10 +68,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
+import androidx.work.OneTimeWorkRequestBuilder
 import com.example.holodex.BuildConfig
 import com.example.holodex.R
 import com.example.holodex.auth.AuthState
 import com.example.holodex.auth.AuthViewModel
+import com.example.holodex.background.ChannelRepairWorker
 import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.data.ThemePreference
 import com.example.holodex.ui.composables.ApiKeyInputScreen
@@ -214,7 +217,18 @@ fun SettingsScreen(
 
             HorizontalDivider()
             // ------------------------------------
+            SettingsSectionTitle("Debug & Maintenance")
 
+            ListItem(
+                headlineContent = { Text("Fix Channel Metadata") },
+                supportingContent = { Text("Detects and fixes incorrectly labeled channels (External vs Holodex).") },
+                leadingContent = { Icon(Icons.Default.Build, null) },
+                modifier = Modifier.clickable {
+                    val request = OneTimeWorkRequestBuilder<ChannelRepairWorker>().build()
+                    settingsViewModel.enqueueWork(request) // You might need to expose WorkManager in VM or add this helper
+                    Toast.makeText(context, "Migration started. Check logs.", Toast.LENGTH_SHORT).show()
+                }
+            )
             SettingsSectionTitle(stringResource(R.string.settings_section_account))
             // ... (Account Section - Keep as is) ...
             when (val s = authState) {

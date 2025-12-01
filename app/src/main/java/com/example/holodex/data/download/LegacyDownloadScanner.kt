@@ -1,3 +1,4 @@
+// File: java/com/example/holodex/data/download/LegacyDownloadScanner.kt
 package com.example.holodex.data.download
 
 import android.content.Context
@@ -5,8 +6,9 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
 import com.example.holodex.data.db.DownloadStatus
-import com.example.holodex.data.db.DownloadedItemDao
-import com.example.holodex.data.db.DownloadedItemEntity
+import com.example.holodex.data.db.UnifiedDao
+import com.example.holodex.data.db.UnifiedMetadataEntity
+import com.example.holodex.data.db.UserInteractionEntity
 import com.example.holodex.data.model.HolodexSong
 import com.example.holodex.data.model.HolodexVideoItem
 import com.example.holodex.data.model.SearchCondition
@@ -17,7 +19,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -30,7 +31,7 @@ import kotlin.math.max
 class LegacyDownloadScanner @Inject constructor(
     @ApplicationContext private val context: Context,
     private val holodexRepository: HolodexRepository,
-    private val downloadedItemDao: DownloadedItemDao
+    private val unifiedDao: UnifiedDao // Injected UnifiedDao instead of removed DAO
 ) {
     companion object {
         private const val TAG = "LegacyDownloadScanner"
@@ -52,7 +53,11 @@ class LegacyDownloadScanner @Inject constructor(
                 return@withContext 0
             }
 
-            val existingDbFiles = downloadedItemDao.getAllDownloads().first().map { it.fileName }.toSet()
+            // FIX: Use UnifiedDao to get existing download filenames
+            val existingDbFiles = unifiedDao.getAllDownloadsOneShot()
+                .mapNotNull { it.downloadFileName }
+                .toSet()
+
             val filesToProcess = potentialLegacyFiles.filterNot { existingDbFiles.contains(it.name) }
 
             if (filesToProcess.isEmpty()) {
@@ -167,28 +172,44 @@ class LegacyDownloadScanner @Inject constructor(
             ?.first
     }
 
+    // FIX: Updated to use UnifiedDao with Metadata and Interaction tables
     private suspend fun importSong(
         fileInfo: FileInfo,
         video: HolodexVideoItem,
         song: HolodexSong
     ) {
-        val entity = DownloadedItemEntity(
-            videoId = "${video.id}_${song.start}",
+        val itemId = "${video.id}_${song.start}"
+
+        // 1. Upsert Metadata
+        val metadata = UnifiedMetadataEntity(
+            id = itemId,
             title = song.name,
-            artistText = video.channel.name,
+            artistName = video.channel.name,
+            type = "SEGMENT",
+            specificArtUrl = song.artUrl ?: video.channel.photoUrl,
+            uploaderAvatarUrl = video.channel.photoUrl,
+            duration = (song.end - song.start).toLong(),
             channelId = video.channel.id ?: "unknown",
-            artworkUrl = song.artUrl ?: video.channel.photoUrl,
-            durationSec = (song.end - song.start).toLong(),
-            localFileUri = fileInfo.uri.toString(),
-            downloadStatus = DownloadStatus.COMPLETED,
-            downloadedAt = fileInfo.lastModified,
-            fileName = fileInfo.name,
-            targetFormat = "M4A",
-            downloadId = null,
-            progress = 100,
-            trackNumber = null
+            parentVideoId = video.id,
+            startSeconds = song.start.toLong(),
+            endSeconds = song.end.toLong(),
+            lastUpdatedAt = System.currentTimeMillis()
         )
-        downloadedItemDao.insertOrUpdate(entity)
+        unifiedDao.upsertMetadata(metadata)
+
+        // 2. Upsert Interaction (Download Status)
+        val interaction = UserInteractionEntity(
+            itemId = itemId,
+            interactionType = "DOWNLOAD",
+            timestamp = fileInfo.lastModified,
+            localFilePath = fileInfo.uri.toString(),
+            downloadStatus = DownloadStatus.COMPLETED.name,
+            downloadFileName = fileInfo.name,
+            downloadTargetFormat = "M4A",
+            downloadProgress = 100,
+            syncStatus = "SYNCED" // Legacy imports are local, but we mark them synced to avoid accidental deletion logic
+        )
+        unifiedDao.upsertInteraction(interaction)
     }
 
     private fun queryMediaStoreForAppDownloads(): List<FileInfo> {
@@ -334,4 +355,4 @@ class LegacyDownloadScanner @Inject constructor(
         // Fallback: Return full title if no punctuation found
         return albumTitle
     }
-} // <-- This closing brace was missing.
+}

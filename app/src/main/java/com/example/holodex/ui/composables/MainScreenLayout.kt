@@ -18,7 +18,7 @@ fun MainScreenLayout(
     bottomBar: @Composable () -> Unit,
     content: @Composable (PaddingValues) -> Unit
 ) {
-    val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
+    WindowInsets.systemBars.asPaddingValues()
 
     SubcomposeLayout(modifier = modifier) { constraints ->
         val layoutWidth = constraints.maxWidth

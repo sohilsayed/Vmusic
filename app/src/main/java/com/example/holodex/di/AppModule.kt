@@ -10,7 +10,6 @@ import androidx.work.WorkManager
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import com.example.holodex.playback.PlaybackRequestManager
 import com.example.holodex.util.PaletteExtractor
 import com.google.gson.Gson
 import dagger.Module
@@ -44,9 +43,7 @@ object AppModule {
     @Singleton
     fun provideGson(): Gson = Gson()
 
-    @Provides
-    @Singleton
-    fun providePlaybackRequestManager(): PlaybackRequestManager = PlaybackRequestManager()
+
 
     @Provides
     @Singleton

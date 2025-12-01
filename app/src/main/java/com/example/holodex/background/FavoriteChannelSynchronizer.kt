@@ -27,18 +27,35 @@ class FavoriteChannelSynchronizer @Inject constructor(
             val pendingDeletes = syncRepository.getPendingDeleteItems(TYPE)
             val dirtyItems = syncRepository.getDirtyItems(TYPE)
 
-            if (pendingDeletes.isNotEmpty() || dirtyItems.isNotEmpty()) {
-                logger.info("Phase 1: Sending PATCH with ${pendingDeletes.size} removals, ${dirtyItems.size} additions.")
+            // --- FIX START: Filter External Channels ---
+            val validDirtyItems = mutableListOf<com.example.holodex.data.db.UserInteractionEntity>()
+
+            for (item in dirtyItems) {
+                val meta = syncRepository.getMetadata(item.itemId)
+                // Check if it's explicitly marked External OR if it's a manually added channel that might be external
+                // Note: "External" is the artistName/org we used in AddChannelViewModel
+                if (meta?.org != "External" && meta?.artistName != "External") {
+                    validDirtyItems.add(item)
+                } else {
+                    // It's external. Mark as SYNCED locally so we stop trying to push it.
+                    logger.info("  Skipping external channel sync for: ${meta?.title} (${item.itemId})")
+                    syncRepository.markAsSynced(item.itemId, TYPE, "local_only")
+                }
+            }
+            // --- FIX END ---
+
+            if (pendingDeletes.isNotEmpty() || validDirtyItems.isNotEmpty()) {
+                logger.info("Phase 1: Sending PATCH with ${pendingDeletes.size} removals, ${validDirtyItems.size} additions.")
 
                 val patchOps = mutableListOf<PatchOperation>()
                 pendingDeletes.forEach { patchOps.add(PatchOperation("remove", it.itemId)) }
-                dirtyItems.forEach { patchOps.add(PatchOperation("add", it.itemId)) }
+                validDirtyItems.forEach { patchOps.add(PatchOperation("add", it.itemId)) } // Use filtered list
 
                 val response = authApiService.patchFavoriteChannels(patchOps)
 
                 if (response.isSuccessful) {
                     if (pendingDeletes.isNotEmpty()) syncRepository.confirmBatchDeletion(pendingDeletes.map { it.itemId }, TYPE)
-                    if (dirtyItems.isNotEmpty()) syncRepository.markBatchSynced(dirtyItems.map { it.itemId }, TYPE)
+                    if (validDirtyItems.isNotEmpty()) syncRepository.markBatchSynced(validDirtyItems.map { it.itemId }, TYPE)
                     logger.info("  -> Upstream PATCH successful.")
                 } else {
                     logger.warning("  -> Upstream PATCH failed: ${response.code()}")
@@ -78,7 +95,8 @@ class FavoriteChannelSynchronizer @Inject constructor(
                     uploaderAvatarUrl = remote.photo,
                     duration = 0,
                     channelId = remote.id,
-                    description = null
+                    description = null,
+                    org = remote.org
                 )
 
                 // Server ID for a channel is its own ID

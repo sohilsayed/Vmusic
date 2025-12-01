@@ -25,7 +25,9 @@ class SyncRepository @Inject constructor(
     suspend fun getSyncedItems(type: String): List<UserInteractionEntity> {
         return unifiedDao.getSyncedItems(type)
     }
-
+    suspend fun getMetadata(id: String): UnifiedMetadataEntity? {
+        return unifiedDao.getItemByIdOneShot(id)?.metadata
+    }
     /**
      * Called after a successful upstream POST.
      * Updates local item with the Server ID and marks as SYNCED.

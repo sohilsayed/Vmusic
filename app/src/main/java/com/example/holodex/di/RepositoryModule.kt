@@ -15,7 +15,6 @@ import com.example.holodex.data.cache.BrowseListCache
 import com.example.holodex.data.cache.SearchListCache
 import com.example.holodex.data.db.AppDatabase
 import com.example.holodex.data.db.DiscoveryDao
-import com.example.holodex.data.db.HistoryDao
 import com.example.holodex.data.db.PlaylistDao
 import com.example.holodex.data.db.StarredPlaylistDao
 import com.example.holodex.data.db.SyncMetadataDao
@@ -75,14 +74,12 @@ abstract class RepositoryModule {
             videoDao: VideoDao,
             playlistDao: PlaylistDao,
             appDatabase: AppDatabase,
-            // *** THE FIX: Reorder arguments to match the constructor ***
-            @DefaultDispatcher defaultDispatcher: CoroutineDispatcher, // Use Qualifier
-            historyDao: HistoryDao,
+            @DefaultDispatcher defaultDispatcher: CoroutineDispatcher,
             syncMetadataDao: SyncMetadataDao,
             starredPlaylistDao: StarredPlaylistDao,
             tokenManager: TokenManager,
             unifiedDao: UnifiedDao,
-            unifiedRepository: UnifiedVideoRepository, // Added
+            unifiedRepository: UnifiedVideoRepository,
             @ApplicationScope applicationScope: CoroutineScope
         ): HolodexRepository {
             return HolodexRepository(
@@ -95,18 +92,16 @@ abstract class RepositoryModule {
                 videoDao,
                 playlistDao,
                 appDatabase,
-                defaultDispatcher, // Correct position
-                historyDao,
+                defaultDispatcher,
                 syncMetadataDao,
                 starredPlaylistDao,
                 tokenManager,
                 unifiedDao,
-                unifiedRepository, // Pass it here
+                unifiedRepository,
                 applicationScope
             )
         }
 
-        // provideLocalRepository REMOVED
 
         @Provides
         @Singleton

@@ -11,7 +11,6 @@ import androidx.work.WorkerParameters
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.size.Size
-import com.example.holodex.data.db.DownloadedItemDao
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +27,6 @@ import java.io.IOException
 class MetadataUpdateWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val downloadedItemDao: DownloadedItemDao
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -78,7 +76,7 @@ class MetadataUpdateWorker @AssistedInject constructor(
             if (artworkBytes != null) {
                 tag.deleteArtworkField()
                 val artwork = ArtworkFactory.getNew()
-                artwork.setBinaryData(artworkBytes)
+                artwork.binaryData = artworkBytes
                 artwork.mimeType = "image/jpeg"
                 tag.setField(artwork)
             }

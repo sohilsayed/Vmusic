@@ -1,3 +1,4 @@
+// File: java/com/example/holodex/viewmodel/VideoDetailsViewModel.kt
 package com.example.holodex.viewmodel
 
 import androidx.compose.ui.graphics.Color
@@ -10,9 +11,10 @@ import com.example.holodex.data.model.HolodexSong
 import com.example.holodex.data.model.HolodexVideoItem
 import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.playback.PlaybackRequestManager
+import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.playback.domain.usecase.AddOrFetchAndAddUseCase
+import com.example.holodex.playback.player.PlaybackController
 import com.example.holodex.util.DynamicTheme
 import com.example.holodex.util.PaletteExtractor
 import com.example.holodex.util.ThumbnailQuality
@@ -21,13 +23,13 @@ import com.example.holodex.viewmodel.mappers.toPlaybackItem
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toVirtualSegmentUnifiedDisplayItem
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.collections.immutable.ImmutableList // Import
-import kotlinx.collections.immutable.persistentListOf // Import
-import kotlinx.collections.immutable.toImmutableList // Import
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
@@ -38,8 +40,9 @@ class VideoDetailsViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val holodexRepository: HolodexRepository,
     private val downloadRepository: DownloadRepository,
-    private val playbackRequestManager: PlaybackRequestManager,
+    private val unifiedRepository: UnifiedVideoRepository, // <--- ADDED THIS
     private val addOrFetchAndAddUseCase: AddOrFetchAndAddUseCase,
+    private val playbackController: PlaybackController,
     private val paletteExtractor: PaletteExtractor
 ) : ViewModel() {
 
@@ -101,14 +104,20 @@ class VideoDetailsViewModel @Inject constructor(
             val isEffectivelySegmentless = videoItem.channel.org == "External" || videoItem.songs.isNullOrEmpty()
 
             if (isEffectivelySegmentless) {
-                val likedIds = holodexRepository.likedItemIds.first()
+                // Use firstOrNull to avoid crash if flow is empty
+                val likedIds = unifiedRepository.observeLikedItemIds().firstOrNull() ?: emptySet()
                 val isLiked = likedIds.contains(videoItem.id)
+
                 val virtualSegment = videoItem.toVirtualSegmentUnifiedDisplayItem(isLiked, isDownloaded = false)
-                _unifiedSongItems.value = persistentListOf(virtualSegment) // Immutable list
+                _unifiedSongItems.value = persistentListOf(virtualSegment)
             } else {
                 val songs = videoItem.songs!!
-                val likedIds = holodexRepository.likedItemIds.first()
-                val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+                // Use firstOrNull to avoid crash
+                val likedIds = unifiedRepository.observeLikedItemIds().firstOrNull() ?: emptySet()
+
+                // *** FIX: Use Unified Repository to get downloads safely ***
+                val downloadedIds = unifiedRepository.observeDownloadedIds().firstOrNull() ?: emptySet()
+
                 val unifiedItems = songs.sortedBy { it.start }.map { song ->
                     song.toUnifiedDisplayItem(
                         parentVideo = videoItem,
@@ -116,12 +125,11 @@ class VideoDetailsViewModel @Inject constructor(
                         isDownloaded = downloadedIds.contains("${videoItem.id}_${song.start}")
                     )
                 }
-                _unifiedSongItems.value = unifiedItems.toImmutableList() // Convert to Immutable
+                _unifiedSongItems.value = unifiedItems.toImmutableList()
             }
         }
     }
 
-    // ... (rest of file remains unchanged)
     private suspend fun updateTheme(videoId: String) {
         val artworkUrl = getYouTubeThumbnailUrl(videoId, ThumbnailQuality.MAX).firstOrNull()
         _dynamicTheme.value = paletteExtractor.extractThemeFromUrl(
@@ -136,7 +144,7 @@ class VideoDetailsViewModel @Inject constructor(
         viewModelScope.launch {
             val itemsToPlay = _unifiedSongItems.value.map { it.toPlaybackItem() }
             if (startIndex in itemsToPlay.indices) {
-                playbackRequestManager.submitPlaybackRequest(items = itemsToPlay, startIndex = startIndex)
+                playbackController.loadAndPlay(itemsToPlay, startIndex)
             } else {
                 _error.value = "Invalid song index."
             }

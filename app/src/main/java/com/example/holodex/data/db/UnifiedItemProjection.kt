@@ -36,13 +36,17 @@ data class UnifiedItemProjection(
 
             downloadStatus = downloadInteraction?.downloadStatus,
 
+            // --- FIX IS HERE: PASS THE PATH ---
+            localFilePath = downloadInteraction?.localFilePath,
+            // ---------------------------------
+
             isLiked = likeInteraction != null,
 
             itemTypeForPlaylist = if (isSegment) LikedItemType.SONG_SEGMENT else LikedItemType.VIDEO,
             songStartSec = metadata.startSeconds?.toInt(),
             songEndSec = metadata.endSeconds?.toInt(),
             originalArtist = null,
-            isExternal = metadata.type == "CHANNEL" || metadata.org == "External"
+            isExternal = metadata.org == "External"
         )
     }
 }

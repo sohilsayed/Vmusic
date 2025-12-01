@@ -44,15 +44,18 @@ data class UnifiedMetadataEntity(
     val lastUpdatedAt: Long = System.currentTimeMillis()
 ) {
     fun getComputedArtworkList(): List<String> {
-        val urls = mutableListOf<String>()
-        if (!specificArtUrl.isNullOrBlank()) urls.add(specificArtUrl)
-
-        val targetId = parentVideoId ?: if (type != "CHANNEL") id else null
-        if (targetId != null) {
-            urls.addAll(getYouTubeThumbnailUrl(targetId, ThumbnailQuality.MEDIUM))
+        // If specific art exists, just return that 1 item list.
+        // Coil will handle the fallback if it fails, we don't need to send 4 URLs to the UI every time.
+        if (!specificArtUrl.isNullOrBlank()) {
+            return listOf(specificArtUrl)
         }
 
-        if (!uploaderAvatarUrl.isNullOrBlank()) urls.add(uploaderAvatarUrl)
-        return urls
+        // Fallback only if needed
+        val targetId = parentVideoId ?: if (type != "CHANNEL") id else null
+        return if (targetId != null) {
+            getYouTubeThumbnailUrl(targetId, ThumbnailQuality.MEDIUM)
+        } else {
+            emptyList()
+        }
     }
 }

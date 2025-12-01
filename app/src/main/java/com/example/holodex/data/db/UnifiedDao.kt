@@ -1,3 +1,4 @@
+// File: java/com/example/holodex/data/db/UnifiedDao.kt
 package com.example.holodex.data.db
 
 import androidx.room.Dao
@@ -5,6 +6,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -12,15 +14,30 @@ interface UnifiedDao {
 
     // --- WRITES ---
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertMetadata(metadata: UnifiedMetadataEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMetadataIgnore(metadata: UnifiedMetadataEntity): Long
+
+    @Update
+    suspend fun updateMetadataRaw(metadata: UnifiedMetadataEntity)
+
+    @Transaction
+    suspend fun upsertMetadata(metadata: UnifiedMetadataEntity) {
+        val rowId = insertMetadataIgnore(metadata)
+        if (rowId == -1L) {
+            updateMetadataRaw(metadata)
+        }
+    }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertInteraction(interaction: UserInteractionEntity)
 
-    // *** THIS WAS MISSING ***
     @Query("DELETE FROM user_interactions WHERE itemId = :itemId AND interactionType = :type")
     suspend fun deleteInteraction(itemId: String, type: String)
+
+    // --- NEW METHOD FOR HISTORY SYNC ---
+    @Query("DELETE FROM user_interactions WHERE interactionType = :type")
+    suspend fun deleteAllInteractionsByType(type: String)
+    // -----------------------------------
 
     @Query("UPDATE user_interactions SET syncStatus = 'PENDING_DELETE' WHERE itemId = :itemId AND interactionType = :type")
     suspend fun softDeleteInteraction(itemId: String, type: String)
@@ -97,6 +114,8 @@ interface UnifiedDao {
     )
     fun getHistory(): Flow<List<UnifiedItemProjection>>
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMetadataBatch(metadataList: List<UnifiedMetadataEntity>): List<Long>
     // --- READS (Sync Worker) ---
 
     @Query("SELECT * FROM user_interactions WHERE interactionType = :type AND syncStatus = 'DIRTY'")
@@ -107,41 +126,35 @@ interface UnifiedDao {
 
     @Query("SELECT * FROM unified_metadata WHERE id = :id")
     suspend fun getItemByIdOneShot(id: String): UnifiedItemProjection?
-    // --- NEW SYNC SPECIFIC QUERIES ---
 
-    // 1. Find items waiting to be uploaded (Additions)
+    // --- SYNC SPECIFIC QUERIES ---
+
     @Query("SELECT * FROM user_interactions WHERE interactionType = :type AND syncStatus = 'DIRTY'")
     suspend fun getDirtyItems(type: String): List<UserInteractionEntity>
 
-    // 2. Find items waiting to be deleted (Removals)
     @Query("SELECT * FROM user_interactions WHERE interactionType = :type AND syncStatus = 'PENDING_DELETE'")
     suspend fun getPendingDeleteItems(type: String): List<UserInteractionEntity>
 
-    // 3. Find items that are already synced (Reference for Downstream sync)
     @Query("SELECT * FROM user_interactions WHERE interactionType = :type AND syncStatus = 'SYNCED'")
     suspend fun getSyncedItems(type: String): List<UserInteractionEntity>
 
-    // 4. Confirm Upload: Set serverId and mark SYNCED
     @Query("UPDATE user_interactions SET serverId = :serverId, syncStatus = 'SYNCED' WHERE itemId = :itemId AND interactionType = :type")
     suspend fun confirmUpload(itemId: String, type: String, serverId: String)
 
-    // 5. Confirm Deletion: Remove row completely
     @Query("DELETE FROM user_interactions WHERE itemId = :itemId AND interactionType = :type")
     suspend fun confirmDeletion(itemId: String, type: String)
 
-    // 6. Downstream Insert: Insert item from server as SYNCED
-    // (Uses upsertInteraction, but logic handles the object creation)
-
-    // 7. Downstream Delete: Remove local SYNCED item because it was gone on server
     @Query("DELETE FROM user_interactions WHERE itemId = :itemId AND interactionType = :type AND syncStatus = 'SYNCED'")
     suspend fun deleteSyncedItem(itemId: String, type: String)
 
-    // 8. Batch Update for Downstream Sync
     @Query("UPDATE user_interactions SET syncStatus = 'SYNCED' WHERE itemId IN (:ids) AND interactionType = :type")
     suspend fun markBatchAsSynced(ids: List<String>, type: String)
 
     @Query("DELETE FROM user_interactions WHERE itemId IN (:ids) AND interactionType = :type AND syncStatus = 'PENDING_DELETE'")
     suspend fun deleteBatchPending(ids: List<String>, type: String)
+
+    @Query("SELECT * FROM user_interactions WHERE interactionType = 'DOWNLOAD' AND downloadStatus = 'COMPLETED' AND itemId IN (:ids)")
+    suspend fun getCompletedDownloadsBatch(ids: List<String>): List<UserInteractionEntity>
 
     // --- DOWNLOAD SPECIFIC UPDATES ---
 
@@ -159,5 +172,11 @@ interface UnifiedDao {
 
     @Query("SELECT * FROM user_interactions WHERE itemId = :itemId AND interactionType = 'DOWNLOAD'")
     suspend fun getDownloadInteraction(itemId: String): UserInteractionEntity?
+
+    @Query("SELECT * FROM user_interactions WHERE itemId = :itemId AND interactionType = 'DOWNLOAD'")
+    fun getDownloadInteractionSync(itemId: String): UserInteractionEntity?
+
+
+
 
 }

@@ -6,6 +6,7 @@ import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.data.model.AudioStreamDetails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.stream.AudioStream
@@ -28,7 +29,7 @@ class YouTubeStreamRepository @Inject constructor(
     private val saverMaxBitrate = 96
     private val standardMaxBitrate = 140
 
-    suspend fun getAudioStreamDetails(videoId: String): Result<AudioStreamDetails> {
+    suspend fun getAudioStreamDetails(videoId: String, preferM4a: Boolean = false): Result<AudioStreamDetails> {
         return withContext(Dispatchers.IO) {
             try {
                 val youtubeUrl = "https://www.youtube.com/watch?v=$videoId"
@@ -36,11 +37,19 @@ class YouTubeStreamRepository @Inject constructor(
                     ?: return@withContext Result.failure(Exception("YouTube service not found."))
 
                 val streamInfo: StreamInfo = StreamInfo.getInfo(ytService, youtubeUrl)
-
                 val allAudioStreams: List<AudioStream> = streamInfo.audioStreams
 
                 if (allAudioStreams.isEmpty()) {
                     return@withContext Result.failure(Exception("No audio streams found for video ID `$videoId`."))
+                }
+
+                // 1. Determine which pool of streams to choose from
+                val candidateStreams = if (preferM4a) {
+                    val m4aStreams = allAudioStreams.filter { it.format == MediaFormat.M4A }
+                    // Fallback to all streams if no M4A is found, to prevent crash
+                    if (m4aStreams.isNotEmpty()) m4aStreams else allAudioStreams
+                } else {
+                    allAudioStreams
                 }
 
                 val audioQualityPref = sharedPreferences.getString(
@@ -48,6 +57,7 @@ class YouTubeStreamRepository @Inject constructor(
                     AppPreferenceConstants.AUDIO_QUALITY_BEST
                 ) ?: AppPreferenceConstants.AUDIO_QUALITY_BEST
 
+                // Helper to apply quality/bitrate filters
                 val applyQualityFilterAndSort: (List<AudioStream>) -> AudioStream? = { streams ->
                     val qualityFiltered = when (audioQualityPref) {
                         AppPreferenceConstants.AUDIO_QUALITY_SAVER ->
@@ -62,22 +72,23 @@ class YouTubeStreamRepository @Inject constructor(
                     qualityFiltered.maxByOrNull { it.averageBitrate }
                 }
 
-                // --- FIX: Expanded fallback to include OPUS and WEBM with priority ---
+                // 2. Apply your specific logic to the candidate list
+                // We run your exact logic on 'candidateStreams'
                 val bestAudioStream =
                     // Priority 1: Original Japanese track
-                    applyQualityFilterAndSort(allAudioStreams.filter {
+                    applyQualityFilterAndSort(candidateStreams.filter {
                         it.audioTrackType == AudioTrackType.ORIGINAL && it.audioLocale?.language == Locale.JAPANESE.language
                     })
                     // Priority 2: Any Original track
-                        ?: applyQualityFilterAndSort(allAudioStreams.filter {
+                        ?: applyQualityFilterAndSort(candidateStreams.filter {
                             it.audioTrackType == AudioTrackType.ORIGINAL
                         })
                         // Priority 3: Any Japanese track
-                        ?: applyQualityFilterAndSort(allAudioStreams.filter {
+                        ?: applyQualityFilterAndSort(candidateStreams.filter {
                             it.audioLocale?.language == Locale.JAPANESE.language
                         })
                         // Final Fallback: The best of whatever is left
-                        ?: applyQualityFilterAndSort(allAudioStreams)
+                        ?: applyQualityFilterAndSort(candidateStreams)
 
 
                 if (bestAudioStream != null) {
@@ -85,8 +96,9 @@ class YouTubeStreamRepository @Inject constructor(
                         ?: return@withContext Result.failure(Exception("Selected best audio stream has no URL for $videoId`."))
                     val finalFormat = bestAudioStream.format?.getName()?.uppercase() ?: "UNKNOWN"
                     val qualityDesc = "${bestAudioStream.averageBitrate}kbps"
-                    val trackType = bestAudioStream.audioTrackType?.name ?: "UNKNOWN_TYPE"
-                    Timber.i("$TAG: Resolved stream for $videoId. Quality: '$audioQualityPref', Selected: $finalFormat $qualityDesc, Track Type: $trackType, URL Length: ${finalUrl.length}")
+
+                    Timber.i("$TAG: Resolved stream for $videoId. PreferM4a: $preferM4a. Result: $finalFormat $qualityDesc")
+
                     return@withContext Result.success(
                         AudioStreamDetails(
                             streamUrl = finalUrl,
@@ -95,15 +107,12 @@ class YouTubeStreamRepository @Inject constructor(
                         )
                     )
                 } else {
-                    Timber.e("$TAG: Could not select a best audio stream for $videoId after all fallbacks.")
-                    return@withContext Result.failure(Exception("No suitable audio stream found for $videoId after all fallbacks."))
+                    return@withContext Result.failure(Exception("No suitable audio stream found."))
                 }
 
             } catch (e: Exception) {
                 Timber.e(e, "$TAG: Unexpected error for $videoId")
-                return@withContext Result.failure(
-                    Exception("An unexpected error occurred while fetching stream for $videoId: ${e.message}", e)
-                )
+                return@withContext Result.failure(e)
             }
         }
     }

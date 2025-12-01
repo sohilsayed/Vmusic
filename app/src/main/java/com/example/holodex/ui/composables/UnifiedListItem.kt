@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
@@ -170,15 +171,37 @@ fun UnifiedListItem(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    if (item.isSegment && item.isDownloaded) {
-                        Spacer(Modifier.width(6.dp))
-                        Icon(
-                            Icons.Filled.CloudDone,
-                            contentDescription = "Downloaded",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
+
+                    // --- CHANGED SECTION ---
+                    when (item.downloadStatus) {
+                        "COMPLETED" -> {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Filled.CloudDone,
+                                contentDescription = "Downloaded",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        "FAILED", "EXPORT_FAILED" -> {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Filled.ErrorOutline, // Make sure to import this
+                                contentDescription = "Download Failed",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        "DOWNLOADING", "PROCESSING", "ENQUEUED" -> {
+                            Spacer(Modifier.width(6.dp))
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
                     }
+                    // -----------------------
                 }
 
                 Text(

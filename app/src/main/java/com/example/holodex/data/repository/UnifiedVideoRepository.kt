@@ -11,6 +11,7 @@ import com.example.holodex.viewmodel.UnifiedDisplayItem
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -49,6 +50,37 @@ class UnifiedVideoRepository @Inject constructor(
         return unifiedDao.getDownloads().map { list ->
             list.map { it.toUnifiedDisplayItem() }
         }
+    }
+    fun getHistory(): Flow<List<UnifiedDisplayItem>> {
+        return unifiedDao.getHistory().map { list -> list.map { it.toUnifiedDisplayItem() } }
+    }
+
+    // --- NEW HELPER FOR CRASH FIX ---
+    suspend fun observeDownloadedIds(): Flow<Set<String>> {
+        // We use the interaction table directly for speed and stability
+        return unifiedDao.getAllDownloadsOneShot().let {
+            // This logic needs to be a Flow to use .first() safely in Vms without blocking main thread on DB access if room wasn't ready
+            // Actually, Room's Flow always emits. Let's use the DAO flow for safety.
+            unifiedDao.getDownloads().map { list ->
+                list.filter {
+                    it.interactions.any { i -> i.interactionType == "DOWNLOAD" && i.downloadStatus == "COMPLETED" }
+                }.map { it.metadata.id }.toSet()
+            }
+        }.distinctUntilChanged()
+    }
+
+    // Alternative: A suspend function if you just need a snapshot
+    suspend fun getDownloadedIdsSnapshot(): Set<String> {
+        return unifiedDao.getAllDownloadsOneShot()
+            .filter { it.downloadStatus == "COMPLETED" }
+            .map { it.itemId }
+            .toSet()
+    }
+
+    suspend fun getDownloadedItemsIdToPathMap(): Map<String, String> {
+        return unifiedDao.getAllDownloadsOneShot()
+            .filter { it.downloadStatus == "COMPLETED" && !it.localFilePath.isNullOrBlank() }
+            .associate { it.itemId to it.localFilePath!! }
     }
     // ============================================================================================
     // 2. USER ACTIONS (TOGGLES)
@@ -137,7 +169,7 @@ class UnifiedVideoRepository @Inject constructor(
         }
     }
 
-    suspend fun getChannel(channelId: String): com.example.holodex.data.model.discovery.ChannelDetails? = withContext(Dispatchers.IO) {
+    suspend fun getChannel(channelId: String): ChannelDetails? = withContext(Dispatchers.IO) {
         // We look for metadata of type 'CHANNEL' with this ID
         // We can use the existing DAO method 'getItemByIdOneShot' if you added it,
         // or just filter the flow (slower), or add a specific query.
@@ -148,7 +180,7 @@ class UnifiedVideoRepository @Inject constructor(
 
         if (projection.metadata.type != "CHANNEL") return@withContext null
 
-        com.example.holodex.data.model.discovery.ChannelDetails(
+        ChannelDetails(
             id = projection.metadata.id,
             name = projection.metadata.title,
             englishName = null, // Metadata only stores one title

@@ -8,9 +8,8 @@ import com.example.holodex.auth.AuthState
 import com.example.holodex.data.model.discovery.DiscoveryResponse
 import com.example.holodex.data.model.discovery.PlaylistStub
 import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.playback.PlaybackRequestManager
-import com.example.holodex.playback.domain.repository.PlaybackRepository
 import com.example.holodex.playback.domain.usecase.AddItemsToQueueUseCase
+import com.example.holodex.playback.player.PlaybackController
 import com.example.holodex.viewmodel.mappers.toPlaybackItem
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toVideoShell
@@ -26,9 +25,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
-import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
-import com.example.holodex.viewmodel.mappers.toVideoShell
-import com.example.holodex.viewmodel.mappers.toPlaybackItem
 
 enum class ShelfType {
     RECENT_STREAMS,
@@ -48,8 +44,7 @@ data class DiscoveryScreenState(
 @HiltViewModel
 class DiscoveryViewModel @Inject constructor(
     private val holodexRepository: HolodexRepository,
-    private val playbackRequestManager: PlaybackRequestManager,
-    private val playbackRepository: PlaybackRepository,
+    private val playbackController: PlaybackController,
     private val addItemsToQueueUseCase: AddItemsToQueueUseCase
 ) : ViewModel() {
 
@@ -178,29 +173,31 @@ class DiscoveryViewModel @Inject constructor(
 
     fun playUnifiedItem(item: UnifiedDisplayItem) {
         viewModelScope.launch {
-            playbackRequestManager.submitPlaybackRequest(items = listOf(item.toPlaybackItem()))
+            // New Call:
+            playbackController.loadAndPlay(listOf(item.toPlaybackItem()))
         }
     }
+
     fun playRadioPlaylist(playlist: PlaylistStub) {
         viewModelScope.launch {
             if (playlist.type.startsWith("radio")) {
                 Timber.d("Playing playlist as Radio: ${playlist.id}")
-                playbackRepository.prepareAndPlayRadio(playlist.id)
+
+                playbackController.loadRadio(playlist.id)
             } else {
-                // This is a fallback for playing a normal playlist from this screen
                 val result = holodexRepository.getFullPlaylistContent(playlist.id)
                 result.onSuccess { fullPlaylist ->
                     val playbackItems = fullPlaylist.content?.mapNotNull { song ->
-                        if (song.channel.id == null) {
-                            null
-                        } else {
+                        if (song.channel.id == null) null
+                        else {
                             val videoShell = song.toVideoShell(fullPlaylist.title)
                             song.toPlaybackItem(videoShell)
                         }
                     } ?: emptyList()
 
                     if (playbackItems.isNotEmpty()) {
-                        playbackRequestManager.submitPlaybackRequest(items = playbackItems)
+                        // New Call:
+                        playbackController.loadAndPlay(playbackItems)
                     } else {
                         _transientMessage.emit("This playlist appears to be empty.")
                     }
@@ -210,10 +207,12 @@ class DiscoveryViewModel @Inject constructor(
             }
         }
     }
+
     fun addAllToQueue(items: List<UnifiedDisplayItem>) {
         viewModelScope.launch {
             if (items.isNotEmpty()) {
                 val playbackItems = items.map { it.toPlaybackItem() }
+                // New Call (via UseCase wrapper or direct):
                 addItemsToQueueUseCase(playbackItems)
                 _transientMessage.emit("Added ${items.size} songs to queue.")
             }

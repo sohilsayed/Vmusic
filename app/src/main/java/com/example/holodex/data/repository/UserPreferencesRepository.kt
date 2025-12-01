@@ -23,13 +23,13 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
     val autoplayEnabled: Flow<Boolean> = dataStore.data
         .map { preferences ->
-            preferences[AUTOPLAY_NEXT_VIDEO] ?: true // Default to true (autoplay is on)
+            preferences[AUTOPLAY_NEXT_VIDEO] != false // Default to true (autoplay is on)
         }
         .also { Timber.d("$TAG: Observing autoplayEnabled preference.") }
 
     val shuffleOnPlayStartEnabled: Flow<Boolean> = dataStore.data
         .map { preferences ->
-            preferences[SHUFFLE_ON_PLAY_START] ?: false // Default to false (OFF)
+            preferences[SHUFFLE_ON_PLAY_START] == true // Default to false (OFF)
         }
 
     suspend fun setAutoplayEnabled(enabled: Boolean) {

@@ -23,7 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -32,18 +31,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.example.holodex.R
 import com.example.holodex.ui.composables.EmptyState
 import com.example.holodex.ui.composables.UnifiedListItem
 import com.example.holodex.viewmodel.FavoritesViewModel
+import com.example.holodex.viewmodel.HistorySideEffect
 import com.example.holodex.viewmodel.HistoryViewModel
 import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import com.example.holodex.viewmodel.VideoListViewModel
+import org.orbitmvi.orbit.compose.collectAsState
+import org.orbitmvi.orbit.compose.collectSideEffect
 
-@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun HistoryScreen(
     modifier: Modifier = Modifier,
@@ -51,26 +50,33 @@ fun HistoryScreen(
     videoListViewModel: VideoListViewModel,
     favoritesViewModel: FavoritesViewModel,
     playlistManagementViewModel: PlaylistManagementViewModel,
-    contentPadding: PaddingValues = PaddingValues(0.dp) // NEW PARAMETER
+    contentPadding: PaddingValues = PaddingValues(0.dp)
 ) {
     val historyViewModel: HistoryViewModel = hiltViewModel()
-    val historyItems by historyViewModel.unifiedHistoryItems.collectAsStateWithLifecycle()
+
+    // --- MIGRATED: Use Orbit collection ---
+    val state by historyViewModel.collectAsState()
+    val historyItems = state.items
+    // --------------------------------------
+
     val context = LocalContext.current
 
-    LaunchedEffect(Unit) {
-        historyViewModel.transientMessage.collect { message ->
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    // --- MIGRATED: Use Orbit Side Effects ---
+    historyViewModel.collectSideEffect { effect ->
+        when(effect) {
+            is HistorySideEffect.ShowToast -> {
+                Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        if (historyItems.isEmpty()) {
+        if (historyItems.isEmpty() && !state.isLoading) {
             EmptyState(
                 message = stringResource(R.string.message_no_history),
                 onRefresh = {}
             )
         } else {
-            // Header is static, List scrolls
             HistoryHeader(
                 songCount = historyItems.size,
                 onPlayAll = { historyViewModel.playAllHistory() },
@@ -80,7 +86,6 @@ fun HistoryScreen(
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                // *** FIX: Use the dynamic content padding ***
                 contentPadding = contentPadding
             ) {
                 items(
@@ -101,6 +106,7 @@ fun HistoryScreen(
     }
 }
 
+// ... HistoryHeader remains the same ...
 @Composable
 private fun HistoryHeader(
     songCount: Int,

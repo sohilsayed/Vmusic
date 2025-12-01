@@ -1,6 +1,6 @@
 @file:OptIn(androidx.media3.common.util.UnstableApi::class)
-package com.example.holodex.ui.composables.sheets// File: java\com\example\holodex\ui\composables\sheets\BrowseFiltersSheet.kt
-// ... (imports)import com.example.holodex.viewmodel.state.SongSegmentFilterMode
+package com.example.holodex.ui.composables.sheets
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -42,7 +42,6 @@ import com.example.holodex.viewmodel.state.VideoSortField
 import com.example.holodex.viewmodel.state.ViewTypePreset
 import org.orbitmvi.orbit.compose.collectAsState
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowseFiltersSheet(
@@ -69,8 +68,13 @@ fun BrowseFiltersSheet(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Filter & Sort Music Streams", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 16.dp))
+        Text(
+            text = "Filter & Sort Music Streams",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
 
+        // --- VIEW TYPE PRESET ---
         FilterSectionHeader("View As")
         val currentViewPresetDisplay by remember(tempFilters, organizationsForDropdown) {
             derivedStateOf {
@@ -79,12 +83,7 @@ fun BrowseFiltersSheet(
                     if (orgName != "All Vtubers") " - $orgName" else ""
                 } else ""
 
-                val segmentDisplayPart = if (tempFilters.selectedViewPreset == ViewTypePreset.LATEST_STREAMS) {
-                    tempFilters.songSegmentFilterMode.displayNameSuffix ?: ""
-                } else {
-                    ""
-                }
-                "${tempFilters.selectedViewPreset.defaultDisplayName}$orgDisplayPart$segmentDisplayPart"
+                "${tempFilters.selectedViewPreset.defaultDisplayName}$orgDisplayPart"
             }
         }
 
@@ -105,26 +104,23 @@ fun BrowseFiltersSheet(
                         text = { Text(displayName) },
                         onClick = {
                             val currentOrgApiVal = tempFilters.selectedOrganization
-                            val currentPrimaryTopic = tempFilters.selectedPrimaryTopic // Preserve topic if any
+                            val currentPrimaryTopic = tempFilters.selectedPrimaryTopic
                             val currentSortField = tempFilters.sortField
                             val currentSortOrder = tempFilters.sortOrder
 
                             var newFilterState = BrowseFilterState.create(
                                 preset = presetBrowseFilterStateFromVM.selectedViewPreset,
-                                songFilterMode = presetBrowseFilterStateFromVM.songSegmentFilterMode,
                                 organization = currentOrgApiVal,
                                 primaryTopic = currentPrimaryTopic,
-                                // Maintain existing sort if it makes sense for the new preset, otherwise use preset default
                                 sortFieldOverride = if (presetBrowseFilterStateFromVM.selectedViewPreset == ViewTypePreset.LATEST_STREAMS && (currentSortField == VideoSortField.START_SCHEDULED || currentSortField == VideoSortField.LIVE_VIEWERS)) null else currentSortField,
                                 sortOrderOverride = if (presetBrowseFilterStateFromVM.selectedViewPreset == ViewTypePreset.LATEST_STREAMS && (currentSortField == VideoSortField.START_SCHEDULED || currentSortField == VideoSortField.LIVE_VIEWERS)) null else currentSortOrder,
                             )
 
-                            // Post-adjustment: if the chosen preset changed the sort field to something incompatible,
-                            // force it to a default compatible sort for the new preset.
+                            // Logic to ensure valid sort for preset
                             if (newFilterState.selectedViewPreset == ViewTypePreset.LATEST_STREAMS) {
                                 if (newFilterState.sortField == VideoSortField.START_SCHEDULED || newFilterState.sortField == VideoSortField.LIVE_VIEWERS) {
                                     newFilterState = newFilterState.copy(
-                                        sortField = VideoSortField.AVAILABLE_AT, // Default to a valid sort for LATEST
+                                        sortField = VideoSortField.AVAILABLE_AT,
                                         sortOrder = SortOrder.DESC
                                     )
                                 }
@@ -132,7 +128,7 @@ fun BrowseFiltersSheet(
                                 if (newFilterState.sortField != VideoSortField.START_SCHEDULED && newFilterState.sortField != VideoSortField.LIVE_VIEWERS) {
                                     newFilterState = newFilterState.copy(
                                         sortField = VideoSortField.START_SCHEDULED,
-                                        sortOrder = SortOrder.ASC // Upcoming usually sorted by earliest scheduled first
+                                        sortOrder = SortOrder.ASC
                                     )
                                 }
                             }
@@ -146,6 +142,7 @@ fun BrowseFiltersSheet(
         }
         Spacer(Modifier.height(16.dp))
 
+        // --- ORGANIZATION ---
         FilterSectionHeader("Organization")
         val currentOrgDisplay = organizationsForDropdown.find { it.second == tempFilters.selectedOrganization }?.first ?: "All Tracked Orgs"
         ExposedDropdownMenuBox(expanded = orgExpanded, onExpandedChange = { orgExpanded = it }, modifier = Modifier.fillMaxWidth()) {
@@ -155,12 +152,10 @@ fun BrowseFiltersSheet(
                 modifier = Modifier.menuAnchor().fillMaxWidth()
             )
             ExposedDropdownMenu(expanded = orgExpanded, onDismissRequest = { orgExpanded = false }) {
-                // --- FIX: Iterate over the collected list ---
                 organizationsForDropdown.forEach { (name, value) ->
                     DropdownMenuItem(text = { Text(name) }, onClick = {
                         tempFilters = BrowseFilterState.create(
                             preset = tempFilters.selectedViewPreset,
-                            songFilterMode = tempFilters.songSegmentFilterMode,
                             organization = value,
                             primaryTopic = tempFilters.selectedPrimaryTopic,
                             sortFieldOverride = tempFilters.sortField,
@@ -173,6 +168,7 @@ fun BrowseFiltersSheet(
         }
         Spacer(Modifier.height(16.dp))
 
+        // --- SORT FIELD ---
         FilterSectionHeader("Sort By")
         ExposedDropdownMenuBox(expanded = sortFieldExpanded, onExpandedChange = { sortFieldExpanded = it }, modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
@@ -215,6 +211,7 @@ fun BrowseFiltersSheet(
         }
         Spacer(Modifier.height(8.dp))
 
+        // --- SORT ORDER ---
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             SortOrder.entries.forEach { order ->
                 Row(Modifier.clickable { tempFilters = tempFilters.copy(sortOrder = order) }.padding(horizontal = 8.dp, vertical = 4.dp).weight(1f), verticalAlignment = Alignment.CenterVertically) {
@@ -225,6 +222,7 @@ fun BrowseFiltersSheet(
         }
         Spacer(Modifier.height(24.dp))
 
+        // --- ACTION BUTTONS ---
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = onDismiss) { Text(stringResource(id = R.string.cancel)) }
             Spacer(Modifier.width(8.dp))

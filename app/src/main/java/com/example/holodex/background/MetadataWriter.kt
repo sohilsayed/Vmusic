@@ -56,7 +56,7 @@ class MetadataWriter @Inject constructor() {
             if (artworkData != null) {
                 tag.deleteArtworkField()
                 val artwork = ArtworkFactory.getNew()
-                artwork.setBinaryData(artworkData)
+                artwork.binaryData = artworkData
                 artwork.mimeType = "image/jpeg"
                 artwork.description = "Cover"
                 tag.setField(artwork)

@@ -4,8 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.media3.common.util.UnstableApi
 import com.example.holodex.data.model.discovery.DiscoveryChannel
-import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toVideoShell
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -39,8 +39,8 @@ sealed class FullListSideEffect {
 class FullListViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val holodexRepository: HolodexRepository,
-    private val downloadRepository: DownloadRepository
-) : ContainerHost<FullListState, FullListSideEffect>, ViewModel() {
+    private val unifiedRepository: UnifiedVideoRepository,
+    ) : ContainerHost<FullListState, FullListSideEffect>, ViewModel() {
 
     companion object {
         const val CATEGORY_TYPE_ARG = "category"
@@ -98,12 +98,15 @@ class FullListViewModel @Inject constructor(
 
         result.onSuccess { response ->
             val likedIds = holodexRepository.likedItemIds.first()
-            val downloadedIds = downloadRepository.getAllDownloads().first().map { it.videoId }.toSet()
+
+            // FIX: Use Unified Repository for downloads
+            val downloadedIds = unifiedRepository.getDownloads().first().map { it.playbackItemId }.toSet()
 
             val newItems: List<Any> = when (response) {
                 is List<*> -> {
                     @Suppress("UNCHECKED_CAST")
                     (response as List<com.example.holodex.data.model.discovery.MusicdexSong>).map { song ->
+                        // FIX: Ensure toVideoShell is imported
                         val videoShell = song.toVideoShell()
                         song.toUnifiedDisplayItem(
                             parentVideo = videoShell,

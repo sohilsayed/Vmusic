@@ -150,7 +150,8 @@ fun HolodexNavHost(
             PlaylistDetailsScreen(
                 navController = navController,
                 playlistManagementViewModel = playlistManagementViewModel,
-                onNavigateUp = { navController.popBackStack() }
+                onNavigateUp = { navController.popBackStack() },
+                contentPadding = contentPadding
             )
         }
 

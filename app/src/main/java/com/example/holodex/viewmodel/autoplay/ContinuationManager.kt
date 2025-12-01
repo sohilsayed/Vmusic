@@ -6,8 +6,7 @@ package com.example.holodex.viewmodel.autoplay
 import com.example.holodex.data.repository.HolodexRepository
 import com.example.holodex.data.repository.UserPreferencesRepository
 import com.example.holodex.playback.domain.model.PlaybackItem
-import com.example.holodex.playback.domain.model.PlaybackQueue
-import com.example.holodex.playback.domain.repository.PlaybackRepository
+import com.example.holodex.playback.player.PlaybackController
 import com.example.holodex.viewmodel.UnifiedDisplayItem
 import com.example.holodex.viewmodel.mappers.toPlaybackItem
 import com.example.holodex.viewmodel.mappers.toVideoShell
@@ -37,7 +36,8 @@ class ContinuationManager @Inject constructor(
         private const val RADIO_QUEUE_THRESHOLD = 5
     }
 
-    private var autoplayContextItems: List<UnifiedDisplayItem> = Collections.synchronizedList(mutableListOf())
+    private var autoplayContextItems: List<UnifiedDisplayItem> =
+        Collections.synchronizedList(mutableListOf())
 
     private val _isRadioModeActive = MutableStateFlow(false)
     val isRadioModeActive: StateFlow<Boolean> = _isRadioModeActive.asStateFlow()
@@ -73,30 +73,28 @@ class ContinuationManager @Inject constructor(
      * Starts a new radio session. Fetches the initial batch of songs and begins monitoring the queue.
      * @return The initial list of PlaybackItems to start the radio.
      */
-    suspend fun startRadioSession(radioId: String, scope: CoroutineScope, playbackRepository: PlaybackRepository): List<PlaybackItem>? {
-        endCurrentSession() // Stop any previous session
+    suspend fun startRadioSession(
+        radioId: String,
+        scope: CoroutineScope,
+        controller: PlaybackController
+    ): List<PlaybackItem>? {
+        endCurrentSession()
         currentRadioId = radioId
         _isRadioModeActive.value = true
         Timber.d("$TAG: Starting radio session for ID: $radioId")
 
         val initialBatch = fetchRadioBatch(radioId)
         if (initialBatch.isNullOrEmpty()) {
-            Timber.e("$TAG: Failed to fetch initial batch for radio $radioId. Aborting session.")
             endCurrentSession()
             return null
         }
 
-        // Start the job that will monitor the queue
         radioMonitorJob = scope.launch(Dispatchers.IO) {
-            Timber.tag(TAG).i("RADIO_LOG: Monitor job LAUNCHED for radio: $radioId")
-            playbackRepository.observePlaybackQueue().collectLatest { queue ->
-                handleQueueStateForRadio(queue, playbackRepository)
+            // Observe Controller State directly
+            controller.state.collectLatest { state ->
+                handleQueueStateForRadio(state.activeQueue, state.currentIndex, controller)
             }
         }
-        radioMonitorJob?.invokeOnCompletion {
-            Timber.tag(TAG).i("RADIO_LOG: Monitor job COMPLETED/CANCELLED for radio: $radioId")
-        }
-
         return initialBatch
     }
 
@@ -135,24 +133,19 @@ class ContinuationManager @Inject constructor(
         )
     }
 
-    private suspend fun handleQueueStateForRadio(queue: PlaybackQueue, playbackRepository: PlaybackRepository) {
-        val radioId = currentRadioId ?: return // Session ended
+    private suspend fun handleQueueStateForRadio(
+        queue: List<PlaybackItem>,
+        currentIndex: Int,
+        controller: PlaybackController // <--- CHANGED
+    ) {
+        val radioId = currentRadioId ?: return
 
-        if (radioId == null) {
-            Timber.tag(TAG).d("RADIO_LOG: handleQueueState called but no active radio session. Ignoring.")
-            return
-        }
-        val songsRemaining = queue.items.size - (queue.currentIndex + 1)
-        Timber.tag(TAG).d("RADIO_LOG: Queue state update. Songs: ${queue.items.size}, Index: ${queue.currentIndex}, Remaining: $songsRemaining, Threshold: $RADIO_QUEUE_THRESHOLD")
-
+        val songsRemaining = queue.size - (currentIndex + 1)
         if (songsRemaining < RADIO_QUEUE_THRESHOLD) {
-            Timber.d("$TAG: Radio queue threshold reached ($songsRemaining remaining). Fetching next batch.")
             val nextBatch = fetchRadioBatch(radioId)
             if (!nextBatch.isNullOrEmpty()) {
-                playbackRepository.addItemsToQueue(nextBatch)
-                Timber.d("$TAG: Appended ${nextBatch.size} new songs to the radio queue.")
-            } else {
-                Timber.w("$TAG: Fetching next radio batch returned no items.")
+                // Use Controller to add items
+                controller.addItemsToQueue(nextBatch)
             }
         }
     }

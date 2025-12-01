@@ -29,7 +29,7 @@ import androidx.media3.transformer.Transformer
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.holodex.data.db.DownloadStatus
-import com.example.holodex.data.db.DownloadedItemDao
+import com.example.holodex.data.db.UnifiedDao
 import com.example.holodex.di.DownloadCache
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -49,7 +49,7 @@ class M4AExportWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted workerParams: WorkerParameters,
     @DownloadCache private val downloadCache: SimpleCache,
-    private val downloadedItemDao: DownloadedItemDao,
+    private val unifiedDao: UnifiedDao,
     private val metadataWriter: MetadataWriter // <-- INJECT the MetadataWriter
 ) : CoroutineWorker(context, workerParams) {
 
@@ -80,7 +80,7 @@ class M4AExportWorker @AssistedInject constructor(
 
         if (clipStartMs == -1L || clipEndMs == -1L) {
             Timber.e("$TAG: Invalid clip times provided.")
-            downloadedItemDao.updateStatus(itemId, DownloadStatus.FAILED)
+            unifiedDao.updateDownloadStatus(itemId, DownloadStatus.FAILED.name)
             return Result.failure()
         }
 
@@ -142,12 +142,7 @@ class M4AExportWorker @AssistedInject constructor(
                 ?: throw IOException("Failed to export temp file to MediaStore.")
 
             // Step 4: Finalize and clean up
-            downloadedItemDao.updateStatusToCompleted(
-                videoId = itemId,
-                uri = finalUri.toString(),
-                fileName = finalFileName, // <-- FIX: Pass the file name
-                timestamp = System.currentTimeMillis() // <-- FIX: Pass the timestamp
-            )
+            unifiedDao.completeDownload(itemId, finalUri.toString())
             downloadCache.removeResource(itemId)
             tempOutputFile.delete()
 
@@ -156,7 +151,7 @@ class M4AExportWorker @AssistedInject constructor(
 
         } catch (e: Exception) {
             Timber.e(e, "$TAG: Export failed for item $itemId.")
-            downloadedItemDao.updateStatus(itemId, DownloadStatus.FAILED)
+            unifiedDao.updateDownloadStatus(itemId, DownloadStatus.FAILED.name)
             tempOutputFile.delete()
             return Result.failure()
         }

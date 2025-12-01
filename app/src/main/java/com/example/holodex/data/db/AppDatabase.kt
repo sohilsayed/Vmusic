@@ -8,34 +8,29 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import com.example.holodex.playback.data.model.PersistedPlaybackItemEntity
-import com.example.holodex.playback.data.model.PersistedPlaybackStateDao
-import com.example.holodex.playback.data.model.PersistedPlaybackStateEntity
+import com.example.holodex.playback.data.model.PlaybackDao
+import com.example.holodex.playback.data.model.PlaybackQueueRefEntity
+import com.example.holodex.playback.data.model.PlaybackStateEntity
 
 @Database(
     entities = [
         // --- NEW UNIFIED ENTITIES ---
         UnifiedMetadataEntity::class,
         UserInteractionEntity::class,
-
+        PlaybackStateEntity::class,
+        PlaybackQueueRefEntity::class,
         CachedVideoEntity::class,
         CachedSongEntity::class,
-        PersistedPlaybackItemEntity::class,
-        PersistedPlaybackStateEntity::class,
         PlaylistEntity::class,
         PlaylistItemEntity::class,
         CachedBrowsePage::class,
         CachedSearchPage::class,
-        DownloadedItemEntity::class,
         ParentVideoMetadataEntity::class,
-        HistoryItemEntity::class,
         CachedDiscoveryResponse::class,
         SyncMetadataEntity::class,
-        StarredPlaylistEntity::class,
-        LocalPlaylistEntity::class,
-        LocalPlaylistItemEntity::class
+        StarredPlaylistEntity::class
     ],
-    version = 23, // INCREMENTED VERSION
+    version = 26, // INCREMENTED VERSION
     exportSchema = true
 )
 @TypeConverters(
@@ -44,7 +39,6 @@ import com.example.holodex.playback.data.model.PersistedPlaybackStateEntity
     HolodexVideoItemListConverter::class,
     StringListConverter::class,
     DiscoveryResponseConverter::class,
-    DownloadStatusConverter::class,
     SyncStatusConverter::class
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -54,14 +48,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
     abstract fun browsePageDao(): BrowsePageDao
     abstract fun searchPageDao(): SearchPageDao
-    abstract fun downloadedItemDao(): DownloadedItemDao
     abstract fun parentVideoMetadataDao(): ParentVideoMetadataDao
-    abstract fun historyDao(): HistoryDao
     abstract fun videoDao(): VideoDao
     abstract fun discoveryDao(): DiscoveryDao
     abstract fun syncMetadataDao(): SyncMetadataDao
     abstract fun starredPlaylistDao(): StarredPlaylistDao
-    abstract fun persistedPlaybackStateDao(): PersistedPlaybackStateDao
+    abstract fun playbackDao(): PlaybackDao
 
     companion object {
         @Volatile
@@ -244,6 +236,36 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("DROP TABLE IF EXISTS favorite_channels")
             }
         }
+        val MIGRATION_23_24: Migration = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS downloaded_items")
+            }
+        }
+        val MIGRATION_24_25: Migration = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS history_items")
+                // Ensure these are gone if they weren't already
+                db.execSQL("DROP TABLE IF EXISTS liked_items")
+                db.execSQL("DROP TABLE IF EXISTS downloaded_items")
+                db.execSQL("DROP TABLE IF EXISTS local_playlists")
+                db.execSQL("DROP TABLE IF EXISTS local_playlist_items")
+            }
+        }
+        val MIGRATION_25_26: Migration = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Drop the old heavy table
+                db.execSQL("DROP TABLE IF EXISTS persisted_playback_items_table")
+                db.execSQL("DROP TABLE IF EXISTS persisted_playback_state_table")
+
+                // Create new lightweight tables
+                db.execSQL("CREATE TABLE IF NOT EXISTS `playback_state` (`id` INTEGER NOT NULL, `current_index` INTEGER NOT NULL, `position_ms` INTEGER NOT NULL, `shuffle_mode_enabled` INTEGER NOT NULL, `repeat_mode` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+
+                db.execSQL("CREATE TABLE IF NOT EXISTS `playback_queue_ref` (`queue_index` INTEGER NOT NULL, `item_id` TEXT NOT NULL, `is_backup` INTEGER NOT NULL, PRIMARY KEY(`queue_index`, `is_backup`), FOREIGN KEY(`item_id`) REFERENCES `unified_metadata`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_playback_queue_ref_item_id` ON `playback_queue_ref` (`item_id`)")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -256,7 +278,10 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_19_20,
                         MIGRATION_20_21,
                         MIGRATION_21_22,
-                        MIGRATION_22_23
+                        MIGRATION_22_23,
+                        MIGRATION_23_24,
+                        MIGRATION_24_25,
+                        MIGRATION_25_26
                     )
                     .build()
                 INSTANCE = instance
@@ -266,23 +291,7 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
-class DownloadStatusConverter {
-    @TypeConverter
-    fun fromDownloadStatus(value: DownloadStatus?): String? {
-        return value?.name
-    }
 
-    @TypeConverter
-    fun toDownloadStatus(value: String?): DownloadStatus? {
-        return value?.let {
-            try {
-                DownloadStatus.valueOf(it)
-            } catch (_: IllegalArgumentException) {
-                null
-            }
-        }
-    }
-}
 
 class LikedItemTypeConverter {
     @TypeConverter

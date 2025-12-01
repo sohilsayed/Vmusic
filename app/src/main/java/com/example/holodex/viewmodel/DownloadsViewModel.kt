@@ -6,8 +6,7 @@ import androidx.media3.common.util.UnstableApi
 import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.HolodexRepository
 import com.example.holodex.data.repository.UnifiedVideoRepository
-import com.example.holodex.playback.PlaybackRequestManager
-import com.example.holodex.playback.domain.model.PlaybackItem
+import com.example.holodex.playback.player.PlaybackController
 import com.example.holodex.viewmodel.mappers.toPlaybackItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.ImmutableList
@@ -37,7 +36,7 @@ class DownloadsViewModel @Inject constructor(
     private val unifiedRepository: UnifiedVideoRepository,
     private val downloadRepository: DownloadRepository,
     private val holodexRepository: HolodexRepository,
-    private val playbackRequestManager: PlaybackRequestManager
+    private val playbackController: PlaybackController
 ) : ContainerHost<DownloadsState, DownloadsSideEffect>, ViewModel() {
 
     companion object {
@@ -79,35 +78,62 @@ class DownloadsViewModel @Inject constructor(
     }
 
     fun playDownloads(tappedItem: UnifiedDisplayItem) = intent {
-        if (!tappedItem.isDownloaded) {
-            postSideEffect(DownloadsSideEffect.ShowToast("Item is not fully downloaded."))
+        // 1. ERROR STATE: Prioritize Retry
+        if (tappedItem.downloadStatus == "FAILED" || tappedItem.downloadStatus == "EXPORT_FAILED") {
+            postSideEffect(DownloadsSideEffect.ShowToast("Retrying download..."))
+            // If it failed during export, retry export. Otherwise, full retry.
+            if (tappedItem.downloadStatus == "EXPORT_FAILED") {
+                retryExport(tappedItem)
+            } else {
+                retryDownload(tappedItem)
+            }
             return@intent
         }
 
-        // Filter current list for only downloaded items to play in queue
-        val playableItems = state.items.filter { it.isDownloaded }
-
-        if (playableItems.isEmpty()) return@intent
-
-        val playbackItems = playableItems.map { it.toPlaybackItem() }
-        val startIndex = playbackItems.indexOfFirst { it.id == tappedItem.playbackItemId }.coerceAtLeast(0)
-
-        viewModelScope.launch {
-            playbackRequestManager.submitPlaybackRequest(playbackItems, startIndex)
+        // 2. PROCESSING STATE: Prevent Playback
+        if (tappedItem.downloadStatus == "DOWNLOADING" ||
+            tappedItem.downloadStatus == "PROCESSING" ||
+            tappedItem.downloadStatus == "ENQUEUED") {
+            postSideEffect(DownloadsSideEffect.ShowToast("Please wait, download in progress..."))
+            return@intent
         }
+
+        // 3. SUCCESS STATE: Play
+        if (tappedItem.isDownloaded) {
+            // Filter current list for only downloaded items to play in queue
+            val playableItems = state.items.filter { it.isDownloaded }
+
+            if (playableItems.isNotEmpty()) {
+                val playbackItems = playableItems.map { it.toPlaybackItem() }
+                // Use playbackItemId to find index, robust against composite IDs
+                val startIndex = playbackItems.indexOfFirst { it.id == tappedItem.playbackItemId }.coerceAtLeast(0)
+
+                playbackController.loadAndPlay(playbackItems, startIndex)
+
+            }
+            return@intent
+        }
+
+        // 4. Fallback (Zombie state)
+        postSideEffect(DownloadsSideEffect.ShowToast("Status unknown. Deleting..."))
+        deleteDownload(tappedItem.playbackItemId)
     }
+
 
     fun playAllDownloadsShuffled() = intent {
         val playableItems = state.items.filter { it.isDownloaded }
         if (playableItems.isNotEmpty()) {
             val playbackItems = playableItems.map { it.toPlaybackItem() }
-            viewModelScope.launch {
-                playbackRequestManager.submitPlaybackRequest(playbackItems, 0, shouldShuffle = true)
-            }
+
+            playbackItems.shuffled()
+
+            playbackController.loadAndPlay(playbackItems.shuffled(), 0)
+           playbackController.toggleShuffle()
         } else {
             postSideEffect(DownloadsSideEffect.ShowToast("No playable downloads found."))
         }
     }
+
 
     fun deleteDownload(itemId: String) = intent {
         viewModelScope.launch {
@@ -167,8 +193,4 @@ class DownloadsViewModel @Inject constructor(
         }
     }
 
-    // *** Helper function required by DownloadsScreen.kt ***
-    fun mapDownloadToPlaybackItem(item: com.example.holodex.data.db.DownloadedItemEntity): PlaybackItem {
-        return item.toPlaybackItem()
-    }
 }
