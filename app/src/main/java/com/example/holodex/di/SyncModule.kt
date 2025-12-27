@@ -2,7 +2,6 @@
 package com.example.holodex.di
 
 import com.example.holodex.background.FavoriteChannelSynchronizer
-import com.example.holodex.background.HistorySynchronizer
 import com.example.holodex.background.ISynchronizer
 import com.example.holodex.background.LikesSynchronizer
 import com.example.holodex.background.PlaylistSynchronizer
@@ -33,7 +32,5 @@ abstract class SyncModule {
     @IntoSet
     abstract fun bindStarredPlaylistSynchronizer(impl: StarredPlaylistSynchronizer): ISynchronizer
 
-    @Binds
-    @IntoSet
-    abstract fun bindHistorySynchronizer(impl: HistorySynchronizer): ISynchronizer
+
 }

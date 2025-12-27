@@ -1,7 +1,6 @@
 package com.example.holodex.ui
 
 import android.annotation.SuppressLint
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
@@ -10,12 +9,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,12 +33,14 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import com.example.holodex.domain.action.GlobalMediaActionHandler
 import com.example.holodex.ui.composables.FullPlayerActions
 import com.example.holodex.ui.composables.FullPlayerScreenContent
 import com.example.holodex.ui.composables.MainScreenLayout
 import com.example.holodex.ui.composables.MiniPlayerWithProgressBar
 import com.example.holodex.ui.composables.PlaylistManagementDialogs
 import com.example.holodex.ui.navigation.AppDestinations
+import com.example.holodex.ui.navigation.GlobalUiEvent
 import com.example.holodex.ui.navigation.HolodexNavHost
 import com.example.holodex.ui.screens.navigation.BottomNavItem
 import com.example.holodex.ui.theme.HolodexMusicTheme
@@ -58,11 +62,9 @@ private const val TAG = "MainScreenScaffold"
 fun MainScreenScaffold(
     navController: NavHostController,
     activity: ComponentActivity,
-    player: ExoPlayer
+    player: ExoPlayer,
+    actionHandler: GlobalMediaActionHandler
 ) {
-
-    Log.d(TAG, "MainScreenScaffold: Composing")
-
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -72,8 +74,6 @@ fun MainScreenScaffold(
     val playlistManagementViewModel: PlaylistManagementViewModel = hiltViewModel(activity)
     val videoListViewModel: VideoListViewModel = hiltViewModel(activity)
 
-    Log.d(TAG, "MainScreenScaffold: ViewModels created")
-
     // UI State
     var showFullPlayerSheet by remember { mutableStateOf(false) }
     val fullPlayerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -82,7 +82,27 @@ fun MainScreenScaffold(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    // --- Orbit Side Effects ---
+    // --- FIX: Listen for Global Navigation/Action Events ---
+    LaunchedEffect(actionHandler) {
+        actionHandler.uiEvents.collect { event ->
+            when (event) {
+                is GlobalUiEvent.NavigateToVideo -> {
+                    navController.navigate(AppDestinations.videoDetailRoute(event.videoId))
+                }
+                is GlobalUiEvent.NavigateToChannel -> {
+                    navController.navigate("channel_details/${event.channelId}")
+                }
+                is GlobalUiEvent.ShowPlaylistDialog -> {
+                    playlistManagementViewModel.prepareItemForPlaylistAddition(event.item)
+                }
+                is GlobalUiEvent.ShowToast -> {
+                    Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // --- Orbit Side Effects (Legacy/Specific) ---
     videoListViewModel.collectSideEffect { sideEffect ->
         when (sideEffect) {
             is VideoListSideEffect.NavigateTo -> {
@@ -90,7 +110,6 @@ fun MainScreenScaffold(
                     is VideoListViewModel.NavigationDestination.VideoDetails -> {
                         navController.navigate(AppDestinations.videoDetailRoute(destination.videoId))
                     }
-
                     is VideoListViewModel.NavigationDestination.HomeScreenWithSearch -> {
                         navController.navigate(AppDestinations.HOME_ROUTE) {
                             popUpTo(navController.graph.startDestinationId) { saveState = true }
@@ -100,79 +119,76 @@ fun MainScreenScaffold(
                     }
                 }
             }
-
             is VideoListSideEffect.ShowToast -> {
                 Toast.makeText(context, sideEffect.message, Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-
-
     HolodexMusicTheme(settingsViewModel = settingsViewModel) {
-        MainScreenLayout(
+        Surface(
             modifier = Modifier.fillMaxSize(),
-            bottomBar = {
-                Column {
-                    // The MiniPlayer logic remains the same
-                    MiniPlayerWithProgressBar(
-                        playbackViewModel = playbackViewModel,
-                        onTapped = { showFullPlayerSheet = true }
-                    )
-                    NavigationBar {
-                        val navItems = listOf(
-                            BottomNavItem.Discover,
-                            BottomNavItem.Browse,
-                            BottomNavItem.Library,
-                            BottomNavItem.Downloads
+            color = MaterialTheme.colorScheme.background
+        ) {
+            MainScreenLayout(
+                modifier = Modifier.fillMaxSize(),
+                bottomBar = {
+                    Column {
+                        MiniPlayerWithProgressBar(
+                            playbackViewModel = playbackViewModel,
+                            onTapped = { showFullPlayerSheet = true }
                         )
-                        navItems.forEach { item ->
-                            val isSelected = currentRoute == item.route
-                            NavigationBarItem(
-                                icon = { Icon(item.icon, contentDescription = null) },
-                                label = { Text(stringResource(item.titleResId)) },
-                                selected = isSelected,
-                                onClick = {
-                                    if (item.route == AppDestinations.DISCOVERY_ROUTE &&
-                                        navController.graph.startDestinationId == navController.graph.findNode(
-                                            AppDestinations.DISCOVERY_ROUTE
-                                        )?.id
-                                    ) {
-                                        navController.navigate(item.route) {
-                                            popUpTo(0) { inclusive = true }
-                                            launchSingleTop = true
-                                        }
-                                    } else {
-                                        navController.navigate(item.route) {
-                                            popUpTo(navController.graph.findStartDestination().id) {
-                                                saveState = true
+                        NavigationBar {
+                            val navItems = listOf(
+                                BottomNavItem.Discover,
+                                BottomNavItem.Browse,
+                                BottomNavItem.Library,
+                                BottomNavItem.Downloads
+                            )
+                            navItems.forEach { item ->
+                                val isSelected = currentRoute == item.route
+                                NavigationBarItem(
+                                    icon = { Icon(item.icon, contentDescription = null) },
+                                    label = { Text(stringResource(item.titleResId)) },
+                                    selected = isSelected,
+                                    onClick = {
+                                        if (item.route == AppDestinations.DISCOVERY_ROUTE &&
+                                            navController.graph.startDestinationId == navController.graph.findNode(
+                                                AppDestinations.DISCOVERY_ROUTE
+                                            )?.id
+                                        ) {
+                                            navController.navigate(item.route) {
+                                                popUpTo(0) { inclusive = true }
+                                                launchSingleTop = true
                                             }
-                                            launchSingleTop = true
-                                            restoreState = true
+                                        } else {
+                                            navController.navigate(item.route) {
+                                                popUpTo(navController.graph.findStartDestination().id) {
+                                                    saveState = true
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
                                         }
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
-                    Log.d(TAG, "bottomBar Column: NavigationBar composed")
+                }
+            ) { dynamicPadding ->
+                Box(modifier = Modifier.fillMaxSize()) {
+                    HolodexNavHost(
+                        navController = navController,
+                        videoListViewModel = videoListViewModel,
+                        playlistManagementViewModel = playlistManagementViewModel,
+                        activity = activity,
+                        contentPadding = dynamicPadding,
+                        actionHandler = actionHandler
+                    )
                 }
             }
-        ) { dynamicPadding ->
-            // dynamicPadding now contains the EXACT height of (MiniPlayer + NavBar)
-
-            Box(modifier = Modifier.fillMaxSize()) {
-                HolodexNavHost(
-                    navController = navController,
-                    videoListViewModel = videoListViewModel,
-                    playlistManagementViewModel = playlistManagementViewModel,
-                    activity = activity,
-                    // Pass this padding down to your screens!
-                    contentPadding = dynamicPadding
-                )
-            }
         }
-
         if (showFullPlayerSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showFullPlayerSheet = false },

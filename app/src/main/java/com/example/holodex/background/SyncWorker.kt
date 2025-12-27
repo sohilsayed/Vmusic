@@ -14,7 +14,7 @@ import timber.log.Timber
 class SyncWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
-    // --- MODIFICATION: Inject SyncCoordinator, not HolodexRepository ---
+    // --- MODIFICATION: Inject SyncCoordinator, not PlaylistRepository ---
     private val syncCoordinator: SyncCoordinator,
     private val tokenManager: TokenManager
 ) : CoroutineWorker(context, params) {

@@ -1,9 +1,7 @@
 // File: java/com/example/holodex/viewmodel/autoplay/ContinuationManager.kt
-// (Create this new file)
-
 package com.example.holodex.viewmodel.autoplay
 
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.PlaylistRepository
 import com.example.holodex.data.repository.UserPreferencesRepository
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.playback.player.PlaybackController
@@ -17,7 +15,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.Collections
@@ -26,7 +26,7 @@ import javax.inject.Singleton
 
 @Singleton
 class ContinuationManager @Inject constructor(
-    private val holodexRepository: HolodexRepository,
+    private val playlistRepository: PlaylistRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val autoplayItemProvider: AutoplayItemProvider
 ) {
@@ -45,34 +45,22 @@ class ContinuationManager @Inject constructor(
     private var currentRadioId: String? = null
     private var radioMonitorJob: Job? = null
 
-    /**
-     * Called by ViewModels to provide the current list of items on screen,
-     * which will be used as the source for autoplay suggestions.
-     */
+    private var isFetchingRadioItems = false
+
     fun setAutoplayContext(items: List<UnifiedDisplayItem>) {
-        // Only update context if the new list is not empty.
-        // This prevents transient empty states from wiping a valid, existing context.
         if (items.isNotEmpty()) {
             Timber.d("$TAG: Setting autoplay context with ${items.size} items.")
             autoplayContextItems = Collections.synchronizedList(items.toMutableList())
         } else {
-            Timber.d("$TAG: Ignoring empty context update. Keeping existing context with ${autoplayContextItems.size} items.")
+            Timber.d("$TAG: Ignoring empty context update.")
         }
     }
 
-    /**
-     * Explicit method for intentionally clearing the autoplay context when a user
-     * performs an action that should reset it, like a new search or pull-to-refresh.
-     */
     fun clearAutoplayContext() {
         Timber.d("$TAG: Explicitly clearing autoplay context.")
         autoplayContextItems = Collections.synchronizedList(mutableListOf())
     }
 
-    /**
-     * Starts a new radio session. Fetches the initial batch of songs and begins monitoring the queue.
-     * @return The initial list of PlaybackItems to start the radio.
-     */
     suspend fun startRadioSession(
         radioId: String,
         scope: CoroutineScope,
@@ -81,6 +69,7 @@ class ContinuationManager @Inject constructor(
         endCurrentSession()
         currentRadioId = radioId
         _isRadioModeActive.value = true
+        isFetchingRadioItems = false
         Timber.d("$TAG: Starting radio session for ID: $radioId")
 
         val initialBatch = fetchRadioBatch(radioId)
@@ -90,17 +79,24 @@ class ContinuationManager @Inject constructor(
         }
 
         radioMonitorJob = scope.launch(Dispatchers.IO) {
-            // Observe Controller State directly
-            controller.state.collectLatest { state ->
-                handleQueueStateForRadio(state.activeQueue, state.currentIndex, controller)
-            }
+            // FIX: Only observe relevant state changes.
+            // We map to a Pair of (Queue Size, Current Index) and use distinctUntilChanged.
+            // This prevents 'progressMs' updates from re-triggering (and cancelling via collectLatest) the logic.
+            controller.state
+                .map { it.activeQueue.size to it.currentIndex }
+                .distinctUntilChanged()
+                .collectLatest { (queueSize, currentIndex) ->
+                    // Pass the queue size and index we just extracted, but we need the actual list for logic
+                    // It's safe to read the list from the controller state inside the block or pass it if mapped
+                    // Better to just access the controller's current state inside for the list content if needed,
+                    // or map the whole list (might be heavy for equals check).
+                    // Simplest efficient fix:
+                    handleQueueStateForRadio(controller.state.value.activeQueue, currentIndex, controller)
+                }
         }
         return initialBatch
     }
 
-    /**
-     * Ends the current radio session, stopping any background monitoring.
-     */
     fun endCurrentSession() {
         if (currentRadioId != null) {
             Timber.d("$TAG: Ending radio session for ID: $currentRadioId")
@@ -109,12 +105,9 @@ class ContinuationManager @Inject constructor(
         radioMonitorJob = null
         currentRadioId = null
         _isRadioModeActive.value = false
+        isFetchingRadioItems = false
     }
 
-    /**
-     * Provides the next items to play when a finite queue ends, respecting the user's autoplay setting.
-     * @return A list of new PlaybackItems to append, or null if autoplay is disabled or no items are found.
-     */
     suspend fun provideAutoplayItems(currentQueue: List<PlaybackItem>): List<PlaybackItem>? {
         val isAutoplayEnabled = userPreferencesRepository.autoplayEnabled.first()
         if (!isAutoplayEnabled) {
@@ -124,34 +117,50 @@ class ContinuationManager @Inject constructor(
 
         Timber.d("$TAG: Autoplay is enabled. Attempting to provide next items.")
 
-
         return autoplayItemProvider.provideNextItemsForAutoplay(
             currentScreenItems = autoplayContextItems,
-            lastPlayedItemIdInQueue = currentQueue.lastOrNull()?.id,
-            { item -> item.toPlaybackItem() }, // Pass the mapper function
-            { video, song -> song.toPlaybackItem(video) } // Pass the other mapper function
+            lastPlayedItemIdInQueue = currentQueue.lastOrNull()?.id
         )
     }
 
     private suspend fun handleQueueStateForRadio(
         queue: List<PlaybackItem>,
         currentIndex: Int,
-        controller: PlaybackController // <--- CHANGED
+        controller: PlaybackController
     ) {
         val radioId = currentRadioId ?: return
+        if (isFetchingRadioItems) return
 
         val songsRemaining = queue.size - (currentIndex + 1)
-        if (songsRemaining < RADIO_QUEUE_THRESHOLD) {
-            val nextBatch = fetchRadioBatch(radioId)
-            if (!nextBatch.isNullOrEmpty()) {
-                // Use Controller to add items
-                controller.addItemsToQueue(nextBatch)
+
+        if (queue.isNotEmpty() && songsRemaining < RADIO_QUEUE_THRESHOLD) {
+            try {
+                isFetchingRadioItems = true
+                Timber.d("$TAG: Radio queue low ($songsRemaining remaining). Fetching more...")
+
+                val nextBatch = fetchRadioBatch(radioId)
+                if (!nextBatch.isNullOrEmpty()) {
+                    // Avoid adding duplicates if the API returns items we already have
+                    val existingIds = queue.map { it.id }.toSet()
+                    val newItems = nextBatch.filter { !existingIds.contains(it.id) }
+
+                    if (newItems.isNotEmpty()) {
+                        controller.addItemsToQueue(newItems)
+                        Timber.d("$TAG: Added ${newItems.size} items to radio queue.")
+                    } else {
+                        Timber.w("$TAG: API returned items, but all were duplicates.")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "$TAG: Failed to fetch radio batch.")
+            } finally {
+                isFetchingRadioItems = false
             }
         }
     }
 
     private suspend fun fetchRadioBatch(radioId: String): List<PlaybackItem>? {
-        val result = holodexRepository.getRadioContent(radioId)
+        val result = playlistRepository.getRadioContent(radioId)
         return result.getOrNull()?.content?.mapNotNull { song ->
             val videoShell = song.toVideoShell(result.getOrNull()?.title ?: "")
             song.toPlaybackItem(videoShell)

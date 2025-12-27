@@ -10,7 +10,6 @@ import com.example.holodex.data.db.UnifiedItemProjection
 @Dao
 interface PlaybackDao {
 
-    // --- WRITES ---
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun setPlaybackState(state: PlaybackStateEntity)
@@ -22,29 +21,26 @@ interface PlaybackDao {
     suspend fun insertQueueRefs(refs: List<PlaybackQueueRefEntity>)
 
     @Transaction
-    suspend fun saveFullState(
+    suspend fun saveQueueAndState(
         state: PlaybackStateEntity,
         activeQueue: List<PlaybackQueueRefEntity>,
         backupQueue: List<PlaybackQueueRefEntity>
     ) {
-        // Atomic transaction: Clear old state -> Save new state
         clearQueue()
         setPlaybackState(state)
-        insertQueueRefs(activeQueue)
+        if (activeQueue.isNotEmpty()) {
+            insertQueueRefs(activeQueue)
+        }
         if (backupQueue.isNotEmpty()) {
             insertQueueRefs(backupQueue)
         }
     }
 
     // --- READS ---
-
     @Query("SELECT * FROM playback_state WHERE id = 0 LIMIT 1")
     suspend fun getState(): PlaybackStateEntity?
 
-    /**
-     * Fetches the Active Queue (Shuffled or Normal)
-     * Joins with UnifiedMetadata so we get Titles/Images instantly.
-     */
+    // FIX: Join with Unified Metadata to get the full objects back
     @Transaction
     @Query("""
         SELECT M.* FROM unified_metadata M
@@ -54,10 +50,6 @@ interface PlaybackDao {
     """)
     suspend fun getActiveQueueWithMetadata(): List<UnifiedItemProjection>
 
-    /**
-     * Fetches the Backup Queue (Original Order)
-     * Used to restore order when un-shuffling.
-     */
     @Transaction
     @Query("""
         SELECT M.* FROM unified_metadata M

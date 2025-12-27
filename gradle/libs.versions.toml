@@ -3,24 +3,24 @@
 [versions]
 # Android Core & UI
 accompanistSystemuicontroller = "0.34.0"
-activityCompose = "1.10.1"
+activityCompose = "1.10.0"
 androidxCore = "1.16.0" # Using 1.16.0 as requested
-coilCompose = "2.6.0"
-coreSplashscreen = "1.0.1"
-hiltCompiler = "1.2.0"
-kotlinxCoroutinesGuava = "1.9.0"
-material3 = "1.3.2"
+coilCompose = "2.7.0"
+coreSplashscreen = "1.2.0"
+hiltCompiler = "1.3.0"
+kotlinxCoroutinesGuava = "1.10.2"
+material3 = "1.4.0"
 voyager = "1.1.0-beta03"
 # Lifecycle & Navigation
-androidxLifecycle = "2.9.2"
-navigationCompose = "2.9.3"
+androidxLifecycle = "2.10.0"
+navigationCompose = "2.9.6"
 reorderable = "2.5.1"
 # Hilt
 hilt = "2.57"
 # Media3
-media3 = "1.8.0"
-datastore = "1.1.7"
-work = "2.10.3"
+media3 = "1.9.0"
+datastore = "1.2.0"
+work = "2.11.0"
 
 # NewPipe Extractor
 newpipeExtractor = "0.24.6"
@@ -42,7 +42,7 @@ androidxTestExtJunit = "1.3.0"
 androidxEspressoCore = "3.7.0"
 
 # Room
-room = "2.7.2"
+room = "2.6.1"
 
 kotlinx-collections-immutable = "0.3.6"
 
@@ -60,7 +60,7 @@ timber = "5.0.1"
 
 # Android Gradle Plugin (referenced in settings.gradle.kts)
 androidGradlePlugin = "8.10.1"
-media3Ui = "1.8.0"
+media3Ui = "1.9.0"
 security_crypto = "1.1.0"
 appauth = "0.11.1"
 [libraries]
@@ -72,7 +72,7 @@ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = 
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
 # Jetpack Compose BOM - CRITICAL: This pulls in all Compose library versions from the BOM.
 androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "hiltCompiler" }
-compose-bom = { group = "androidx.compose", name = "compose-bom", version = "2025.07.00" }
+compose-bom = { group = "androidx.compose", name = "compose-bom", version = "2025.12.01" }
 kotlinx-collections-immutable = { module = "org.jetbrains.kotlinx:kotlinx-collections-immutable", version.ref = "kotlinx-collections-immutable" }
 
 # Compose Libraries (versions are implied by the BOM - DO NOT specify version.ref for these)
@@ -142,13 +142,14 @@ work-runtime = { group = "androidx.work", name = "work-runtime", version.ref = "
 # hilt
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
-hilt-work = { module = "androidx.hilt:hilt-work", version = "1.2.0" }
-hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version = "1.2.0" }
+hilt-work = { module = "androidx.hilt:hilt-work", version = "1.3.0" }
+hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version = "1.3.0" }
 voyager-navigator = { module = "cafe.adriel.voyager:voyager-navigator", version.ref = "voyager" }
 voyager-tab-navigator = { module = "cafe.adriel.voyager:voyager-tab-navigator", version.ref = "voyager" }
 voyager-transitions = { module = "cafe.adriel.voyager:voyager-transitions", version.ref = "voyager" }
 voyager-bottom-sheet-navigator = {module = "cafe.adriel.voyager:voyager-bottom-sheet-navigator", version.ref = "voyager" }
 # Desugaring
+desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar-jdk-libs" }
 desugar-jdk-libs-nio = { group = "com.android.tools", name = "desugar_jdk_libs_nio", version.ref = "desugar-jdk-libs" }
 
 # Testing

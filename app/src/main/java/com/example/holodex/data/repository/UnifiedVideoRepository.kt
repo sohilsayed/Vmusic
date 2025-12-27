@@ -8,6 +8,7 @@ import com.example.holodex.data.model.discovery.ChannelDetails
 import com.example.holodex.di.IoDispatcher
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.viewmodel.UnifiedDisplayItem
+import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -20,61 +21,42 @@ import javax.inject.Singleton
 @Singleton
 class UnifiedVideoRepository @Inject constructor(
     private val unifiedDao: UnifiedDao,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO // Use Qualifier
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
-    // ============================================================================================
-    // 1. UI DATA STREAMS
-    // ============================================================================================
+    // --- Optimized Flows ---
 
     fun getFavorites(): Flow<List<UnifiedDisplayItem>> {
-        return unifiedDao.getFavorites().map { list ->
-            list.map { it.toUnifiedDisplayItem() }
-        }
+        return unifiedDao.getOptimizedFavoritesFeed().map { list -> list.map { it.toUnifiedDisplayItem() } }
     }
 
+    fun getDownloads(): Flow<List<UnifiedDisplayItem>> {
+        return unifiedDao.getOptimizedDownloadsFeed().map { list -> list.map { it.toUnifiedDisplayItem() } }
+    }
+
+    fun getHistory(): Flow<List<UnifiedDisplayItem>> {
+        return unifiedDao.getOptimizedHistoryFeed().map { list -> list.map { it.toUnifiedDisplayItem() } }
+    }
+
+    // --- Channel Logic remains same (uses Projections due to FAV_CHANNEL join complexity not being bottleneck) ---
     fun getFavoriteChannels(): Flow<List<UnifiedDisplayItem>> {
-        return unifiedDao.getFavoriteChannels().map { list ->
-            list.map { it.toUnifiedDisplayItem() }
-        }
+        return unifiedDao.getFavoriteChannels().map { list -> list.map { it.toUnifiedDisplayItem() } }
     }
+
     fun getFavoriteChannelIds(): Flow<List<String>> {
-        return unifiedDao.getFavoriteChannels().map { list ->
-            list.map { projection -> projection.metadata.id }
-        }
+        return unifiedDao.getFavoriteChannels().map { list -> list.map { it.metadata.id } }
     }
+
     fun observeLikedItemIds(): Flow<Set<String>> {
         return unifiedDao.getLikedItemIds().map { it.toSet() }
     }
-    fun getDownloads(): Flow<List<UnifiedDisplayItem>> {
-        return unifiedDao.getDownloads().map { list ->
-            list.map { it.toUnifiedDisplayItem() }
-        }
-    }
-    fun getHistory(): Flow<List<UnifiedDisplayItem>> {
-        return unifiedDao.getHistory().map { list -> list.map { it.toUnifiedDisplayItem() } }
+
+    fun observeDownloadedIds(): Flow<Set<String>> {
+        return unifiedDao.getDownloadsFeed().map { list -> list.map { it.metadata.id }.toSet() }.distinctUntilChanged()
     }
 
-    // --- NEW HELPER FOR CRASH FIX ---
-    suspend fun observeDownloadedIds(): Flow<Set<String>> {
-        // We use the interaction table directly for speed and stability
-        return unifiedDao.getAllDownloadsOneShot().let {
-            // This logic needs to be a Flow to use .first() safely in Vms without blocking main thread on DB access if room wasn't ready
-            // Actually, Room's Flow always emits. Let's use the DAO flow for safety.
-            unifiedDao.getDownloads().map { list ->
-                list.filter {
-                    it.interactions.any { i -> i.interactionType == "DOWNLOAD" && i.downloadStatus == "COMPLETED" }
-                }.map { it.metadata.id }.toSet()
-            }
-        }.distinctUntilChanged()
-    }
-
-    // Alternative: A suspend function if you just need a snapshot
     suspend fun getDownloadedIdsSnapshot(): Set<String> {
-        return unifiedDao.getAllDownloadsOneShot()
-            .filter { it.downloadStatus == "COMPLETED" }
-            .map { it.itemId }
-            .toSet()
+        return unifiedDao.getAllDownloadsOneShot().filter { it.downloadStatus == "COMPLETED" }.map { it.itemId }.toSet()
     }
 
     suspend fun getDownloadedItemsIdToPathMap(): Map<String, String> {
@@ -82,15 +64,11 @@ class UnifiedVideoRepository @Inject constructor(
             .filter { it.downloadStatus == "COMPLETED" && !it.localFilePath.isNullOrBlank() }
             .associate { it.itemId to it.localFilePath!! }
     }
-    // ============================================================================================
-    // 2. USER ACTIONS (TOGGLES)
-    // ============================================================================================
 
-    suspend fun toggleLike(item: PlaybackItem) = withContext(Dispatchers.IO) {
+    suspend fun toggleLike(item: PlaybackItem) = withContext(ioDispatcher) {
         val isCurrentlyLiked = unifiedDao.isLiked(item.id) > 0
 
         if (isCurrentlyLiked) {
-            // Check if synced before hard deleting
             val serverId = unifiedDao.getLikeServerId(item.id)
             if (serverId != null) {
                 unifiedDao.softDeleteInteraction(item.id, "LIKE")
@@ -98,7 +76,6 @@ class UnifiedVideoRepository @Inject constructor(
                 unifiedDao.deleteInteraction(item.id, "LIKE")
             }
         } else {
-            // 1. Metadata
             val isSegment = item.songId != null
             val type = if (isSegment) "SEGMENT" else "VIDEO"
             val parentId = if (isSegment) item.videoId else null
@@ -118,9 +95,9 @@ class UnifiedVideoRepository @Inject constructor(
                 parentVideoId = parentId,
                 lastUpdatedAt = System.currentTimeMillis()
             )
-            unifiedDao.upsertMetadata(metadata)
 
-            // 2. Interaction
+            unifiedDao.insertMetadataIgnore(metadata)
+
             val interaction = UserInteractionEntity(
                 itemId = item.id,
                 interactionType = "LIKE",
@@ -132,35 +109,33 @@ class UnifiedVideoRepository @Inject constructor(
         }
     }
 
-    suspend fun toggleChannelLike(channel: ChannelDetails) = withContext(Dispatchers.IO) {
-        // We check if ANY interaction of type FAV_CHANNEL exists for this ID
-        val isLiked = unifiedDao.isChannelLiked(channel.id) > 0
+    suspend fun toggleChannelLike(details: ChannelDetails) = withContext(ioDispatcher) {
+        val isLiked = unifiedDao.isChannelLiked(details.id) > 0
 
         if (isLiked) {
-            // Soft delete if synced, hard delete if not (logic inside dao or here)
-            // For simplicity, let's assume soft delete support for channels too
-            val serverId = unifiedDao.getChannelLikeServerId(channel.id)
+            val serverId = unifiedDao.getChannelLikeServerId(details.id)
             if (serverId != null) {
-                unifiedDao.softDeleteInteraction(channel.id, "FAV_CHANNEL")
+                unifiedDao.softDeleteInteraction(details.id, "FAV_CHANNEL")
             } else {
-                unifiedDao.deleteInteraction(channel.id, "FAV_CHANNEL")
+                unifiedDao.deleteInteraction(details.id, "FAV_CHANNEL")
             }
         } else {
             val meta = UnifiedMetadataEntity(
-                id = channel.id,
-                title = channel.name,
-                artistName = channel.org ?: "",
+                id = details.id,
+                title = details.name,
+                artistName = details.org ?: "",
                 type = "CHANNEL",
-                specificArtUrl = channel.photoUrl,
-                uploaderAvatarUrl = channel.photoUrl,
+                specificArtUrl = details.photoUrl,
+                uploaderAvatarUrl = details.photoUrl,
                 duration = 0,
-                channelId = channel.id,
-                description = channel.description
+                channelId = details.id,
+                description = details.description,
+                org = details.org
             )
             unifiedDao.upsertMetadata(meta)
 
             val interaction = UserInteractionEntity(
-                itemId = channel.id,
+                itemId = details.id,
                 interactionType = "FAV_CHANNEL",
                 timestamp = System.currentTimeMillis(),
                 syncStatus = SyncStatus.DIRTY.name
@@ -169,21 +144,14 @@ class UnifiedVideoRepository @Inject constructor(
         }
     }
 
-    suspend fun getChannel(channelId: String): ChannelDetails? = withContext(Dispatchers.IO) {
-        // We look for metadata of type 'CHANNEL' with this ID
-        // We can use the existing DAO method 'getItemByIdOneShot' if you added it,
-        // or just filter the flow (slower), or add a specific query.
-        // Ideally, add 'getMetadataById(id)' to UnifiedDao.
-
-        // Assuming you added getItemByIdOneShot to UnifiedDao as per previous steps:
+    suspend fun getChannel(channelId: String): ChannelDetails? = withContext(ioDispatcher) {
         val projection = unifiedDao.getItemByIdOneShot(channelId) ?: return@withContext null
-
         if (projection.metadata.type != "CHANNEL") return@withContext null
 
         ChannelDetails(
             id = projection.metadata.id,
             name = projection.metadata.title,
-            englishName = null, // Metadata only stores one title
+            englishName = null,
             description = projection.metadata.description,
             photoUrl = projection.metadata.specificArtUrl,
             bannerUrl = null,
@@ -193,5 +161,4 @@ class UnifiedVideoRepository @Inject constructor(
             group = null
         )
     }
-
 }

@@ -1,18 +1,23 @@
-@file:UnstableApi
-
 package com.example.holodex.ui.composables
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PauseCircleFilled
-import androidx.compose.material.icons.filled.PlayCircleFilled
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -40,25 +44,15 @@ import com.example.holodex.playback.domain.model.DomainRepeatMode
 import com.example.holodex.playback.domain.model.DomainShuffleMode
 import com.example.holodex.playback.util.formatDurationSecondsToString
 
-private const val CONTROLS_TAG = "Media3PlayerControls"
-
-/**
- * A self-contained composable that displays a full set of player controls,
- * powered by Media3's Compose state holders.
- *
- * @param player The Media3 Player instance.
- * @param progress The current playback progress, passed from the ViewModel to display on the seek bar.
- * @param onSeek A lambda to be invoked when the user interacts with the seek bar.
- * @param primaryColor The primary theme color, used for prominent elements like the play button.
- * @param onPrimaryColor The color for icons and text that appear on the primary color, used for other controls.
- */
+@UnstableApi
 @Composable
 fun Media3PlayerControls(
-    // The player is now ONLY for reading state for button enabled/disabled status
-    player: Player,
+    player: Player, // Kept only for capability checks
+    isPlaying: Boolean,
+    isLoading: Boolean,
+    progress: DomainPlaybackProgress,
     shuffleMode: DomainShuffleMode,
     repeatMode: DomainRepeatMode,
-    progress: DomainPlaybackProgress,
     isRadioMode: Boolean,
     onPlayPause: () -> Unit,
     onSkipPrevious: () -> Unit,
@@ -67,112 +61,127 @@ fun Media3PlayerControls(
     onToggleRepeat: () -> Unit,
     onSeek: (Long) -> Unit,
     onScrubbingChange: (Boolean) -> Unit,
-    primaryColor: Color,
-    onPrimaryColor: Color,
     modifier: Modifier = Modifier
 ) {
+    // Hardcoded White aesthetic for Full Player as it's on a dark/blurred background
+    val primaryColor = Color.White
+    val inactiveColor = Color.White.copy(alpha = 0.5f)
+    val activeTint = Color(0xFF4CAF50) // Green for active shuffle/repeat
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 24.dp)
     ) {
+        // --- SEEK BAR ---
         PlayerSeekBar(
             progress = progress,
             onSeek = onSeek,
             onScrubbingChange = onScrubbingChange,
             thumbColor = primaryColor,
-            activeTrackColor = onPrimaryColor,
-            inactiveTrackColor = onPrimaryColor.copy(alpha = 0.3f),
-            timeTextColor = onPrimaryColor.copy(alpha = 0.7f)
+            activeTrackColor = primaryColor,
+            inactiveTrackColor = primaryColor.copy(alpha = 0.2f),
+            timeTextColor = primaryColor.copy(alpha = 0.7f)
         )
 
+        Spacer(Modifier.height(16.dp))
+
+        // --- CONTROLS ROW ---
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // --- CUSTOM SHUFFLE BUTTON ---
-            val isShuffleOn = shuffleMode == DomainShuffleMode.ON // Use the provided state
+            // Shuffle
             IconButton(
                 onClick = onToggleShuffle,
-                enabled = player.isCommandAvailable(Player.COMMAND_SET_SHUFFLE_MODE) && !isRadioMode
+                enabled = !isRadioMode && player.isCommandAvailable(Player.COMMAND_SET_SHUFFLE_MODE)
             ) {
                 Icon(
-                    painter = painterResource(id = if (isShuffleOn) R.drawable.ic_shuffle_on_24 else R.drawable.ic_shuffle_off_24),
-                    contentDescription = stringResource(R.string.action_shuffle),
-                    modifier = Modifier.size(28.dp),
-                    tint = if (isShuffleOn) primaryColor else onPrimaryColor.copy(alpha = 0.6f)
+                    painter = painterResource(id = if (shuffleMode == DomainShuffleMode.ON) R.drawable.ic_shuffle_on_24 else R.drawable.ic_shuffle_off_24),
+                    contentDescription = "Shuffle",
+                    tint = if (shuffleMode == DomainShuffleMode.ON) activeTint else inactiveColor,
+                    modifier = Modifier.size(24.dp)
                 )
             }
 
-            // --- CUSTOM PREVIOUS BUTTON ---
+            // Previous
             IconButton(
                 onClick = onSkipPrevious,
-                enabled = player.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                enabled = player.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM),
+                modifier = Modifier.size(48.dp)
             ) {
                 Icon(
                     imageVector = Icons.Filled.SkipPrevious,
-                    contentDescription = stringResource(R.string.action_previous),
-                    modifier = Modifier.size(36.dp),
-                    tint = onPrimaryColor
+                    contentDescription = "Previous",
+                    tint = primaryColor,
+                    modifier = Modifier.size(36.dp)
                 )
             }
 
-            // --- CUSTOM PLAY/PAUSE BUTTON ---
-            IconButton(
-                onClick = onPlayPause,
-                enabled = player.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)
+            // PLAY / PAUSE / LOADING (Hero Button)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(72.dp)
             ) {
-                Icon(
-                    imageVector = if (player.isPlaying) Icons.Filled.PauseCircleFilled else Icons.Filled.PlayCircleFilled,
-                    contentDescription = if (player.isPlaying) stringResource(R.string.action_pause) else stringResource(
-                        R.string.action_play
-                    ),
-                    modifier = Modifier.size(64.dp),
-                    tint = primaryColor
-                )
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        color = primaryColor,
+                        modifier = Modifier.size(48.dp),
+                        strokeWidth = 3.dp
+                    )
+                } else {
+                    IconButton(
+                        onClick = onPlayPause,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(primaryColor, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            tint = Color.Black, // Contrast
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                }
             }
 
-            // --- CUSTOM NEXT BUTTON ---
+            // Next
             IconButton(
                 onClick = onSkipNext,
-                enabled = player.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                enabled = player.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM),
+                modifier = Modifier.size(48.dp)
             ) {
                 Icon(
                     imageVector = Icons.Filled.SkipNext,
-                    contentDescription = stringResource(R.string.action_next),
-                    modifier = Modifier.size(36.dp),
-                    tint = onPrimaryColor
+                    contentDescription = "Next",
+                    tint = primaryColor,
+                    modifier = Modifier.size(36.dp)
                 )
             }
 
-            // --- CUSTOM REPEAT BUTTON ---
+            // Repeat
             IconButton(
                 onClick = onToggleRepeat,
-                enabled = player.isCommandAvailable(Player.COMMAND_SET_REPEAT_MODE) && !isRadioMode
+                enabled = !isRadioMode && player.isCommandAvailable(Player.COMMAND_SET_REPEAT_MODE)
             ) {
-                val iconRes = when (repeatMode) { // Use the provided state
+                val iconRes = when (repeatMode) {
                     DomainRepeatMode.ONE -> R.drawable.ic_repeat_one_24
                     DomainRepeatMode.ALL -> R.drawable.ic_repeat_on_24
                     else -> R.drawable.ic_repeat_off_24
                 }
+                val tint = if (repeatMode != DomainRepeatMode.NONE) activeTint else inactiveColor
                 Icon(
                     painter = painterResource(id = iconRes),
-                    contentDescription = stringResource(R.string.action_repeat),
-                    modifier = Modifier.size(28.dp),
-                    tint = if (repeatMode != DomainRepeatMode.NONE) primaryColor else onPrimaryColor.copy(
-                        alpha = 0.6f
-                    )
+                    contentDescription = "Repeat",
+                    tint = tint,
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
     }
 }
-
-
-// ===================================================================
-// PRIVATE, INTERNAL BUILDING BLOCKS FOR THE CONTROLS
-// ===================================================================
 
 @Composable
 private fun PlayerSeekBar(
@@ -187,46 +196,52 @@ private fun PlayerSeekBar(
     var sliderPosition by remember(progress.positionSec) { mutableFloatStateOf(progress.positionSec.toFloat()) }
     var isUserScrubbing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(isUserScrubbing) {
-        onScrubbingChange(isUserScrubbing)
+    // When the real progress updates, update the slider ONLY if the user isn't dragging it
+    LaunchedEffect(progress.positionSec) {
+        if (!isUserScrubbing) {
+            sliderPosition = progress.positionSec.toFloat()
+        }
     }
 
     Column(Modifier.fillMaxWidth()) {
         Slider(
-            value = if (isUserScrubbing) sliderPosition else progress.positionSec.toFloat(),
+            value = sliderPosition,
             onValueChange = {
                 isUserScrubbing = true
                 sliderPosition = it
+                onScrubbingChange(true)
             },
             onValueChangeFinished = {
                 onSeek(sliderPosition.toLong())
                 isUserScrubbing = false
+                onScrubbingChange(false)
             },
             valueRange = 0f..(progress.durationSec.toFloat().coerceAtLeast(1f)),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(20.dp), // Reduce touch target slightly vertically
             colors = SliderDefaults.colors(
                 thumbColor = thumbColor,
                 activeTrackColor = activeTrackColor,
-                inactiveTrackColor = inactiveTrackColor
+                inactiveTrackColor = inactiveTrackColor,
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent
             )
         )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp),
+                .padding(horizontal = 4.dp), // Align text with track start/end
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = formatDurationSecondsToString(if (isUserScrubbing) sliderPosition.toLong() else progress.positionSec),
-                style = MaterialTheme.typography.bodySmall,
+                text = formatDurationSecondsToString(sliderPosition.toLong()),
+                style = MaterialTheme.typography.labelSmall,
                 color = timeTextColor
             )
             Text(
                 text = formatDurationSecondsToString(progress.durationSec),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = timeTextColor
             )
         }
     }
 }
-

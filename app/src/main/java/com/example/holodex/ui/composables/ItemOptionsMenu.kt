@@ -1,3 +1,4 @@
+// File: java/com/example/holodex/ui/composables/ItemOptionsMenu.kt
 package com.example.holodex.ui.composables
 
 import android.content.Intent
@@ -9,6 +10,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -45,19 +47,13 @@ fun ItemOptionsMenu(
     DropdownMenu(expanded = expanded, onDismissRequest = onDismissRequest) {
         DropdownMenuItem(
             text = { Text(stringResource(R.string.action_add_to_queue)) },
-            onClick = {
-                actions.onAddToQueue()
-                onDismissRequest()
-            },
+            onClick = { actions.onAddToQueue(); onDismissRequest() },
             leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }
         )
 
         DropdownMenuItem(
             text = { Text(stringResource(R.string.action_add_to_playlist_menu)) },
-            onClick = {
-                actions.onAddToPlaylist()
-                onDismissRequest()
-            },
+            onClick = { actions.onAddToPlaylist(); onDismissRequest() },
             leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) }
         )
 
@@ -70,21 +66,24 @@ fun ItemOptionsMenu(
         if (state.canBeDownloaded) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.action_download)) },
-                onClick = {
-                    actions.onDownload()
-                    onDismissRequest()
-                },
+                onClick = { actions.onDownload(); onDismissRequest() },
                 leadingIcon = { Icon(Icons.Filled.Download, null) }
             )
         }
 
-        if (state.isDownloaded) {
+        // --- NEW RETRY OPTION ---
+        if (state.downloadStatus == "FAILED" || state.downloadStatus == "EXPORT_FAILED") {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.action_retry)) },
+                onClick = { actions.onRetryDownload(); onDismissRequest() },
+                leadingIcon = { Icon(Icons.Filled.Refresh, null) }
+            )
+        }
+
+        if (state.isDownloaded || state.downloadStatus == "FAILED" || state.downloadStatus == "EXPORT_FAILED") {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.action_delete)) },
-                onClick = {
-                    actions.onDelete()
-                    onDismissRequest()
-                },
+                onClick = { actions.onDelete(); onDismissRequest() },
                 leadingIcon = { Icon(Icons.Filled.Delete, null) }
             )
         }
@@ -94,32 +93,24 @@ fun ItemOptionsMenu(
         if (state.isSegment) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.action_view_video)) },
-                onClick = {
-                    actions.onGoToVideo(state.videoId)
-                    onDismissRequest()
-                },
+                onClick = { actions.onGoToVideo(state.videoId); onDismissRequest() },
                 leadingIcon = { Icon(Icons.Filled.Movie, null) }
             )
         }
 
         DropdownMenuItem(
             text = { Text(stringResource(R.string.action_view_artist)) },
-            onClick = {
-                actions.onGoToArtist(state.channelId)
-                onDismissRequest()
-            },
+            onClick = { actions.onGoToArtist(state.channelId); onDismissRequest() },
             leadingIcon = { Icon(Icons.Filled.Person, null) },
             enabled = state.channelId.isNotBlank()
         )
     }
 }
-/**
- * A state holder for the ItemOptionsMenu. It contains all the necessary
- * data to determine the visibility and enabled status of menu items.
- */
+
 @Immutable
 data class ItemMenuState(
     val isDownloaded: Boolean,
+    val downloadStatus: String?, // Added
     val isSegment: Boolean,
     val canBeDownloaded: Boolean,
     val shareUrl: String,
@@ -127,10 +118,6 @@ data class ItemMenuState(
     val channelId: String
 )
 
-/**
- * A holder for all the possible actions a user can take from the ItemOptionsMenu.
- * The parent composable is responsible for providing the implementations for these actions.
- */
 @Immutable
 data class ItemMenuActions(
     val onAddToQueue: () -> Unit,
@@ -138,6 +125,7 @@ data class ItemMenuActions(
     val onShare: (String) -> Unit,
     val onDownload: () -> Unit,
     val onDelete: () -> Unit,
+    val onRetryDownload: () -> Unit, // Added
     val onGoToVideo: (String) -> Unit,
     val onGoToArtist: (String) -> Unit,
 )

@@ -1,8 +1,5 @@
 package com.example.holodex.ui.screens
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,10 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Button
@@ -63,17 +58,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
-import androidx.work.OneTimeWorkRequestBuilder
 import com.example.holodex.BuildConfig
 import com.example.holodex.R
 import com.example.holodex.auth.AuthState
 import com.example.holodex.auth.AuthViewModel
-import com.example.holodex.background.ChannelRepairWorker
 import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.data.ThemePreference
 import com.example.holodex.ui.composables.ApiKeyInputScreen
@@ -113,16 +105,7 @@ fun SettingsScreen(
         )
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            Toast.makeText(context, "Permission granted. Starting scan...", Toast.LENGTH_SHORT).show()
-            settingsViewModel.runLegacyFileScan()
-        } else {
-            Toast.makeText(context, "Storage permission is required.", Toast.LENGTH_LONG).show()
-        }
-    }
+
 
     var isClearingCache by remember { mutableStateOf(false) }
 
@@ -216,19 +199,7 @@ fun SettingsScreen(
             )
 
             HorizontalDivider()
-            // ------------------------------------
-            SettingsSectionTitle("Debug & Maintenance")
 
-            ListItem(
-                headlineContent = { Text("Fix Channel Metadata") },
-                supportingContent = { Text("Detects and fixes incorrectly labeled channels (External vs Holodex).") },
-                leadingContent = { Icon(Icons.Default.Build, null) },
-                modifier = Modifier.clickable {
-                    val request = OneTimeWorkRequestBuilder<ChannelRepairWorker>().build()
-                    settingsViewModel.enqueueWork(request) // You might need to expose WorkManager in VM or add this helper
-                    Toast.makeText(context, "Migration started. Check logs.", Toast.LENGTH_SHORT).show()
-                }
-            )
             SettingsSectionTitle(stringResource(R.string.settings_section_account))
             // ... (Account Section - Keep as is) ...
             when (val s = authState) {
@@ -297,27 +268,6 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider()
 
-            SettingsSectionTitle(stringResource(R.string.settings_section_data_performance))
-
-            // ... (Data & Performance - Keep Migrate Button and Legacy Import) ...
-
-            ListItem(
-                headlineContent = { Text("Import Legacy Downloads") },
-                supportingContent = { Text("Scan the HolodexMusic folder for any downloads not in the library.", style = MaterialTheme.typography.bodySmall) },
-                leadingContent = {
-                    if (state.scanStatus is ScanStatus.Scanning) CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                    else Icon(Icons.Default.DocumentScanner, null)
-                },
-                modifier = Modifier.clickable(enabled = state.scanStatus !is ScanStatus.Scanning) {
-                    val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
-                    if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
-                        settingsViewModel.runLegacyFileScan()
-                    } else {
-                        permissionLauncher.launch(permission)
-                    }
-                },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-            )
 
             PreferenceGroupTitle(stringResource(R.string.settings_label_download_location))
             // ... (Location, Image Quality, Audio Quality, etc. - Keep as is) ...

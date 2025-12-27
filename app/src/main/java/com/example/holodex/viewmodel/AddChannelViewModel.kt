@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.holodex.data.model.ChannelSearchResult
 import com.example.holodex.data.model.discovery.ChannelDetails
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.ExternalContentRepository
 import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.viewmodel.state.UiState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,7 +19,7 @@ import javax.inject.Inject
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class AddChannelViewModel @Inject constructor(
-    private val holodexRepository: HolodexRepository, // For Searching (NewPipe)
+    private val externalContentRepository: ExternalContentRepository,
     private val unifiedRepository: UnifiedVideoRepository // For Saving (DB)
 ) : ViewModel() {
 
@@ -63,7 +63,7 @@ class AddChannelViewModel @Inject constructor(
         viewModelScope.launch {
             _searchState.value = UiState.Loading
             // Search via NewPipe (External)
-            holodexRepository.searchForExternalChannels(query)
+            externalContentRepository.searchForExternalChannels(query)
                 .onSuccess { results -> _searchState.value = UiState.Success(results) }
                 .onFailure { error -> _searchState.value = UiState.Error(error.localizedMessage ?: "Search failed") }
         }

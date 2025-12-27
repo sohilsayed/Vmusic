@@ -1,27 +1,20 @@
-// File: java/com/example/holodex/viewmodel/VideoDetailsViewModel.kt
 package com.example.holodex.viewmodel
 
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.media3.common.util.UnstableApi
-import com.example.holodex.data.download.NoDownloadLocationException
+import com.example.holodex.data.model.HolodexChannelMin
 import com.example.holodex.data.model.HolodexSong
 import com.example.holodex.data.model.HolodexVideoItem
 import com.example.holodex.data.repository.DownloadRepository
-import com.example.holodex.data.repository.HolodexRepository
-import com.example.holodex.data.repository.UnifiedVideoRepository
-import com.example.holodex.playback.domain.model.PlaybackItem
-import com.example.holodex.playback.domain.usecase.AddOrFetchAndAddUseCase
+import com.example.holodex.data.repository.VideoRepository
+import com.example.holodex.playback.domain.usecase.AddItemsToQueueUseCase
 import com.example.holodex.playback.player.PlaybackController
 import com.example.holodex.util.DynamicTheme
+import com.example.holodex.util.IdUtil
 import com.example.holodex.util.PaletteExtractor
-import com.example.holodex.util.ThumbnailQuality
-import com.example.holodex.util.getYouTubeThumbnailUrl
 import com.example.holodex.viewmodel.mappers.toPlaybackItem
-import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
-import com.example.holodex.viewmodel.mappers.toVirtualSegmentUnifiedDisplayItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -29,32 +22,36 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.launch
+import org.mobilenativefoundation.store.store5.StoreReadResponse
 import timber.log.Timber
 import javax.inject.Inject
 
-@UnstableApi
 @HiltViewModel
 class VideoDetailsViewModel @Inject constructor(
-    private val savedStateHandle: SavedStateHandle,
-    private val holodexRepository: HolodexRepository,
-    private val downloadRepository: DownloadRepository,
-    private val unifiedRepository: UnifiedVideoRepository, // <--- ADDED THIS
-    private val addOrFetchAndAddUseCase: AddOrFetchAndAddUseCase,
+    savedStateHandle: SavedStateHandle,
+    private val videoRepository: VideoRepository,
     private val playbackController: PlaybackController,
+    private val addItemsToQueueUseCase: AddItemsToQueueUseCase,
+    private val downloadRepository: DownloadRepository,
     private val paletteExtractor: PaletteExtractor
 ) : ViewModel() {
 
     companion object {
         const val VIDEO_ID_ARG = "videoId"
-        private const val TAG = "VideoDetailsVM"
     }
 
-    val videoId: String = savedStateHandle.get<String>(VIDEO_ID_ARG) ?: ""
+    private val rawArg: String = savedStateHandle.get<String>(VIDEO_ID_ARG) ?: ""
+    val videoId: String = IdUtil.extractVideoId(rawArg)
 
-    private val _videoDetails = MutableStateFlow<HolodexVideoItem?>(null)
-    val videoDetails: StateFlow<HolodexVideoItem?> = _videoDetails.asStateFlow()
+    // UI State
+    private val _videoItem = MutableStateFlow<UnifiedDisplayItem?>(null)
+    val videoItem: StateFlow<UnifiedDisplayItem?> = _videoItem.asStateFlow()
+
+    private val _songItems = MutableStateFlow<ImmutableList<UnifiedDisplayItem>>(persistentListOf())
+    val songItems: StateFlow<ImmutableList<UnifiedDisplayItem>> = _songItems.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -65,156 +62,155 @@ class VideoDetailsViewModel @Inject constructor(
     private val _transientMessage = MutableStateFlow<String?>(null)
     val transientMessage: StateFlow<String?> = _transientMessage.asStateFlow()
 
-    private val _unifiedSongItems = MutableStateFlow<ImmutableList<UnifiedDisplayItem>>(persistentListOf())
-    val unifiedSongItems: StateFlow<ImmutableList<UnifiedDisplayItem>> = _unifiedSongItems.asStateFlow()
-
     private val _dynamicTheme = MutableStateFlow(DynamicTheme.default(Color.Black, Color.White))
     val dynamicTheme: StateFlow<DynamicTheme> = _dynamicTheme.asStateFlow()
 
-    fun initialize(videoListViewModel: VideoListViewModel) {
+    init {
         if (videoId.isNotBlank()) {
-            viewModelScope.launch {
-                _isLoading.value = true
-                val prefetchedItem = videoListViewModel.videoItemForDetailScreen
-
-                val isPrefetchedItemComplete = prefetchedItem != null &&
-                        prefetchedItem.id == videoId &&
-                        (prefetchedItem.channel.org == "External" || prefetchedItem.songs != null)
-
-                if (isPrefetchedItemComplete) {
-                    processItem(prefetchedItem!!)
-                } else {
-                    holodexRepository.getVideoWithSongs(videoId, forceRefresh = false)
-                        .onSuccess { processItem(it) }
-                        .onFailure { _error.value = "Failed to load video details: ${it.localizedMessage}" }
-                }
-                _isLoading.value = false
-            }
+            observeData()
         } else {
             _isLoading.value = false
-            _error.value = "Video ID is missing."
+            _error.value = "Invalid Video ID"
         }
     }
 
-    private fun processItem(videoItem: HolodexVideoItem) {
-        _videoDetails.value = videoItem
-        viewModelScope.launch {
-            updateTheme(videoItem.id)
+    private fun observeData() {
+        // FIX: Set refresh = true to force API fetch.
+        // This ensures we get the songs list even if the video is already in DB from a Search result.
+        combine(
+            videoRepository.getVideo(videoId, refresh = true),
+            videoRepository.getVideoSegments(videoId)
+        ) { videoResponse, segments ->
 
-            val isEffectivelySegmentless = videoItem.channel.org == "External" || videoItem.songs.isNullOrEmpty()
-
-            if (isEffectivelySegmentless) {
-                // Use firstOrNull to avoid crash if flow is empty
-                val likedIds = unifiedRepository.observeLikedItemIds().firstOrNull() ?: emptySet()
-                val isLiked = likedIds.contains(videoItem.id)
-
-                val virtualSegment = videoItem.toVirtualSegmentUnifiedDisplayItem(isLiked, isDownloaded = false)
-                _unifiedSongItems.value = persistentListOf(virtualSegment)
-            } else {
-                val songs = videoItem.songs!!
-                // Use firstOrNull to avoid crash
-                val likedIds = unifiedRepository.observeLikedItemIds().firstOrNull() ?: emptySet()
-
-                // *** FIX: Use Unified Repository to get downloads safely ***
-                val downloadedIds = unifiedRepository.observeDownloadedIds().firstOrNull() ?: emptySet()
-
-                val unifiedItems = songs.sortedBy { it.start }.map { song ->
-                    song.toUnifiedDisplayItem(
-                        parentVideo = videoItem,
-                        isLiked = likedIds.contains("${videoItem.id}_${song.start}"),
-                        isDownloaded = downloadedIds.contains("${videoItem.id}_${song.start}")
-                    )
+            when (videoResponse) {
+                is StoreReadResponse.Data -> {
+                    val item = videoResponse.value
+                    _videoItem.value = item
+                    updateTheme(item.artworkUrls.firstOrNull())
+                    _isLoading.value = false
                 }
-                _unifiedSongItems.value = unifiedItems.toImmutableList()
+                is StoreReadResponse.Error -> {
+                    if (_videoItem.value == null) {
+                        _error.value = videoResponse.errorMessageOrNull() ?: "Error loading video"
+                    }
+                    _isLoading.value = false
+                }
+                is StoreReadResponse.Loading -> {
+                    if (_videoItem.value == null) _isLoading.value = true
+                }
+                else -> {}
             }
-        }
+
+            if (segments.isNotEmpty()) {
+                _songItems.value = segments.toImmutableList()
+            } else {
+                val currentVideo = _videoItem.value
+                if (currentVideo != null) {
+                    val virtualPlaybackId = IdUtil.createCompositeId(currentVideo.navigationVideoId, 0)
+
+                    val virtualItem = currentVideo.copy(
+                        stableId = "virtual_segment_${currentVideo.navigationVideoId}",
+                        playbackItemId = virtualPlaybackId,
+                        isSegment = true,
+                        title = currentVideo.title,
+                        durationText = currentVideo.durationText,
+                        songStartSec = 0,
+                        songEndSec = null
+                    )
+                    _songItems.value = persistentListOf(virtualItem)
+                } else {
+                    _songItems.value = persistentListOf()
+                }
+            }
+        }.launchIn(viewModelScope)
     }
 
-    private suspend fun updateTheme(videoId: String) {
-        val artworkUrl = getYouTubeThumbnailUrl(videoId, ThumbnailQuality.MAX).firstOrNull()
+    private suspend fun updateTheme(url: String?) {
+        if (url.isNullOrBlank()) return
         _dynamicTheme.value = paletteExtractor.extractThemeFromUrl(
-            artworkUrl,
+            url,
             DynamicTheme.default(Color.Black, Color.White)
         )
     }
 
-    fun playAllSegments() { playSegment(0) }
+    fun playSegment(item: UnifiedDisplayItem) {
+        val playbackItem = item.toPlaybackItem()
+        playbackController.loadAndPlay(listOf(playbackItem))
+    }
 
-    fun playSegment(startIndex: Int) {
-        viewModelScope.launch {
-            val itemsToPlay = _unifiedSongItems.value.map { it.toPlaybackItem() }
-            if (startIndex in itemsToPlay.indices) {
-                playbackController.loadAndPlay(itemsToPlay, startIndex)
-            } else {
-                _error.value = "Invalid song index."
-            }
+    fun playAllSegments() {
+        val items = _songItems.value
+        if (items.isNotEmpty()) {
+            val playbackItems = items.map { it.toPlaybackItem() }
+            playbackController.loadAndPlay(playbackItems)
         }
     }
 
     fun addAllSegmentsToQueue() {
-        viewModelScope.launch {
-            val itemsToAdd = _unifiedSongItems.value
-            if (itemsToAdd.isNotEmpty()) {
-                addOrFetchAndAddUseCase(itemsToAdd.first().toPlaybackItem().copy(songId = null))
-                    .onSuccess { message -> _transientMessage.value = message }
-                    .onFailure { error -> _error.value = "Failed to add to queue: ${error.localizedMessage}" }
-            }
+        val items = _songItems.value
+        if (items.isNotEmpty()) {
+            val playbackItems = items.map { it.toPlaybackItem() }
+            addItemsToQueueUseCase(playbackItems)
+            _transientMessage.value = "Added ${items.size} songs to queue"
         }
     }
 
     fun downloadAllSegments() {
-        val video = _videoDetails.value
-        if (video == null || video.songs.isNullOrEmpty()) {
+        val videoUi = _videoItem.value
+        val songsUi = _songItems.value
+
+        if (videoUi == null || songsUi.isEmpty()) {
             _error.value = "No segments available to download."
             return
         }
+
         viewModelScope.launch {
             try {
-                _transientMessage.value = "Queueing ${video.songs.size} songs for download..."
-                video.songs.forEach { song ->
-                    downloadRepository.startDownload(video, song)
+                _transientMessage.value = "Queueing ${songsUi.size} songs for download..."
+
+                val channel = HolodexChannelMin(
+                    id = videoUi.channelId,
+                    name = videoUi.artistText,
+                    photoUrl = null,
+                    englishName = null,
+                    org = null,
+                    type = "vtuber"
+                )
+
+                val parentVideo = HolodexVideoItem(
+                    id = videoUi.navigationVideoId,
+                    title = videoUi.title,
+                    type = "stream",
+                    topicId = null,
+                    availableAt = "",
+                    publishedAt = null,
+                    duration = 0,
+                    status = "past",
+                    channel = channel,
+                    songcount = songsUi.size,
+                    description = null,
+                    songs = null
+                )
+
+                songsUi.forEach { item ->
+                    val song = HolodexSong(
+                        name = item.title,
+                        start = item.songStartSec ?: 0,
+                        end = item.songEndSec ?: 0,
+                        itunesId = null,
+                        artUrl = item.artworkUrls.firstOrNull(),
+                        originalArtist = item.originalArtist,
+                        videoId = item.navigationVideoId
+                    )
+                    downloadRepository.startDownload(parentVideo, song)
                 }
             } catch (e: Exception) {
-                Timber.e(e, "A general error occurred during bulk download initiation.")
-                _error.value = "Could not start downloads: An unknown error occurred."
+                Timber.e(e, "Bulk download failed")
+                _error.value = "Error starting downloads"
             }
         }
     }
 
-    fun requestDownloadForSongFromPlaybackItem(item: PlaybackItem) {
-        viewModelScope.launch {
-            val videoResult = holodexRepository.getVideoWithSongs(item.videoId, false).getOrNull()
-            if (videoResult == null) {
-                _error.value = "Could not find video details to start download."
-                return@launch
-            }
-            val songToDownload = videoResult.songs?.find { it.start.toLong() == item.clipStartSec }
-            if (songToDownload == null) {
-                _error.value = "Could not find matching song segment to download."
-                return@launch
-            }
-            requestDownloadForSong(videoResult, songToDownload)
-        }
-    }
-
-    fun requestDownloadForSong(videoItem: HolodexVideoItem, song: HolodexSong) {
-        viewModelScope.launch {
-            try {
-                downloadRepository.startDownload(videoItem, song)
-                _transientMessage.value = "Added '${song.name}' to download queue."
-            } catch (e: NoDownloadLocationException) {
-                _error.value = e.message
-            } catch (e: Exception) {
-                _error.value = "Could not start download: An unknown error occurred."
-            }
-        }
-    }
-
-    fun clearError() {
-        _error.value = null
-    }
-
-    fun clearTransientMessage() {
-        _transientMessage.value = null
-    }
+    fun clearError() { _error.value = null }
+    fun clearTransientMessage() { _transientMessage.value = null }
 }

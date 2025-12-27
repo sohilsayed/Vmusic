@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -48,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
@@ -57,20 +59,18 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.example.holodex.R
+import com.example.holodex.domain.action.GlobalMediaActionHandler
 import com.example.holodex.ui.composables.CustomPagedUnifiedList
 import com.example.holodex.ui.composables.EmptyState
 import com.example.holodex.ui.composables.LoadingSkeleton
 import com.example.holodex.ui.composables.sheets.BrowseFiltersSheet
 import com.example.holodex.ui.navigation.AppDestinations
-import com.example.holodex.viewmodel.FavoritesViewModel
 import com.example.holodex.viewmodel.MusicCategoryType
-import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import com.example.holodex.viewmodel.VideoListSideEffect
 import com.example.holodex.viewmodel.VideoListViewModel
 import kotlinx.coroutines.launch
 import org.orbitmvi.orbit.compose.collectAsState
 import org.orbitmvi.orbit.compose.collectSideEffect
-import timber.log.Timber
 
 @UnstableApi
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,10 +78,9 @@ import timber.log.Timber
 fun HomeScreen(
     navController: NavController,
     videoListViewModel: VideoListViewModel,
-    playlistManagementViewModel: PlaylistManagementViewModel,
-    contentPadding: PaddingValues // NEW PARAMETER
+    contentPadding: PaddingValues,
+    actionHandler: GlobalMediaActionHandler = hiltViewModel()
 ) {
-    val favoritesViewModel: FavoritesViewModel = hiltViewModel()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -103,7 +102,7 @@ fun HomeScreen(
                         navController.navigate(AppDestinations.videoDetailRoute(destination.videoId))
                     }
                     is VideoListViewModel.NavigationDestination.HomeScreenWithSearch -> {
-                        // Already on Home Screen
+                        // Already on Home Screen, logic handled by state update
                     }
                 }
             }
@@ -126,7 +125,6 @@ fun HomeScreen(
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    // Adjust FAB padding to be above the bottom bar
                     FloatingActionButton(
                         onClick = { coroutineScope.launch { listState.animateScrollToItem(0) } },
                         modifier = Modifier.padding(bottom = contentPadding.calculateBottomPadding())
@@ -134,12 +132,14 @@ fun HomeScreen(
                         Icon(Icons.Filled.KeyboardArrowUp, stringResource(R.string.scroll_to_top))
                     }
                 }
-            }
+            },
+            containerColor = Color.Transparent
         ) { innerPadding ->
 
-            // Combine the padding from this Scaffold (Search Bar offset) with the dynamic bottom bar padding
+            val topPadding = innerPadding.calculateTopPadding() + 72.dp
+
             val unifiedPadding = PaddingValues(
-                top = innerPadding.calculateTopPadding() + 80.dp, // Search bar height offset
+                top = topPadding,
                 bottom = contentPadding.calculateBottomPadding() + 16.dp,
                 start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
                 end = innerPadding.calculateEndPadding(LocalLayoutDirection.current)
@@ -161,20 +161,21 @@ fun HomeScreen(
                             listKeyPrefix = "home_search",
                             items = state.searchItems,
                             listState = listState,
+                            actions = actionHandler,
                             onItemClicked = { item ->
-                                Timber.d("HomeScreen (Search): Click ${item.title}")
-                                videoListViewModel.onVideoClicked(item)
+                                if (item.isSegment) {
+
+                                    videoListViewModel.onVideoClicked(item)
+                                } else {
+                                    videoListViewModel.onVideoClicked(item)
+                                }
                             },
-                            videoListViewModel = videoListViewModel,
-                            playlistManagementViewModel = playlistManagementViewModel,
-                            navController = navController,
-                            favoritesViewModel = favoritesViewModel,
                             isLoadingMore = state.searchIsLoadingInitial,
                             endOfList = state.searchEndOfList,
                             onLoadMore = { videoListViewModel.loadMore(MusicCategoryType.SEARCH) },
                             isRefreshing = false,
                             onRefresh = {},
-                            contentPadding = unifiedPadding // PASS THE PADDING HERE
+                            contentPadding = unifiedPadding
                         )
                     }
                 } else {
@@ -186,19 +187,20 @@ fun HomeScreen(
                             listKeyPrefix = "home_browse",
                             items = state.browseItems,
                             listState = listState,
+                            actions = actionHandler,
                             onItemClicked = { item ->
-                                videoListViewModel.onVideoClicked(item)
+                                if (item.isSegment) {
+                                    videoListViewModel.onVideoClicked(item)
+                                } else {
+                                    videoListViewModel.onVideoClicked(item)
+                                }
                             },
-                            videoListViewModel = videoListViewModel,
-                            favoritesViewModel = favoritesViewModel,
-                            playlistManagementViewModel = playlistManagementViewModel,
                             isLoadingMore = state.browseIsLoadingMore,
                             endOfList = state.browseEndOfList,
-                            navController = navController,
                             onLoadMore = { videoListViewModel.loadMore(state.activeContextType) },
                             isRefreshing = state.browseIsRefreshing,
                             onRefresh = { videoListViewModel.refreshCurrentListViaPull() },
-                            contentPadding = unifiedPadding // PASS THE PADDING HERE
+                            contentPadding = unifiedPadding
                         )
                     }
                 }
@@ -209,6 +211,7 @@ fun HomeScreen(
         DockedSearchBar(
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .statusBarsPadding() // <--- CRITICAL FIX FOR FULL SCREEN
                 .padding(top = 8.dp, start = 16.dp, end = 16.dp)
                 .fillMaxWidth(),
             query = state.currentSearchQuery,
@@ -283,7 +286,6 @@ fun HomeScreen(
         }
     }
 }
-
 
 @Composable
 private fun SearchHistoryList(

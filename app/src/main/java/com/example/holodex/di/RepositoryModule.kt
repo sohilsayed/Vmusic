@@ -7,39 +7,21 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import com.example.holodex.auth.AuthRepository
-import com.example.holodex.auth.TokenManager
-import com.example.holodex.data.api.AuthenticatedMusicdexApiService
 import com.example.holodex.data.api.HolodexApiService
-import com.example.holodex.data.api.MusicdexApiService
-import com.example.holodex.data.cache.BrowseListCache
-import com.example.holodex.data.cache.SearchListCache
 import com.example.holodex.data.db.AppDatabase
-import com.example.holodex.data.db.DiscoveryDao
-import com.example.holodex.data.db.PlaylistDao
-import com.example.holodex.data.db.StarredPlaylistDao
-import com.example.holodex.data.db.SyncMetadataDao
-import com.example.holodex.data.db.UnifiedDao // Added
-import com.example.holodex.data.db.VideoDao
 import com.example.holodex.data.repository.DownloadRepository
 import com.example.holodex.data.repository.DownloadRepositoryImpl
-import com.example.holodex.data.repository.HolodexRepository
-// LocalRepository import removed
+import com.example.holodex.data.repository.RoomSearchHistoryRepository
 import com.example.holodex.data.repository.SearchHistoryRepository
-import com.example.holodex.data.repository.SharedPreferencesSearchHistoryRepository
-import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.data.repository.UserPreferencesRepository
 import com.example.holodex.data.repository.YouTubeStreamRepository
 import com.example.holodex.data.repository.userPreferencesDataStore
-import com.google.gson.Gson
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import net.openid.appauth.AuthorizationService
 import javax.inject.Singleton
 
@@ -47,10 +29,12 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
 
+    // --- BINDINGS (Interfaces -> Implementations) ---
+
     @Binds
     @Singleton
     abstract fun bindSearchHistoryRepository(
-        impl: SharedPreferencesSearchHistoryRepository
+        impl: RoomSearchHistoryRepository // <--- Using the new Room-based implementation
     ): SearchHistoryRepository
 
     @Binds
@@ -62,46 +46,14 @@ abstract class RepositoryModule {
 
     companion object {
 
-        @Provides
-        @Singleton
-        fun provideHolodexRepository(
-            holodexApiService: HolodexApiService,
-            musicdexApiService: MusicdexApiService,
-            authenticatedMusicdexApiService: AuthenticatedMusicdexApiService,
-            discoveryDao: DiscoveryDao,
-            browseListCache: BrowseListCache,
-            searchListCache: SearchListCache,
-            videoDao: VideoDao,
-            playlistDao: PlaylistDao,
-            appDatabase: AppDatabase,
-            @DefaultDispatcher defaultDispatcher: CoroutineDispatcher,
-            syncMetadataDao: SyncMetadataDao,
-            starredPlaylistDao: StarredPlaylistDao,
-            tokenManager: TokenManager,
-            unifiedDao: UnifiedDao,
-            unifiedRepository: UnifiedVideoRepository,
-            @ApplicationScope applicationScope: CoroutineScope
-        ): HolodexRepository {
-            return HolodexRepository(
-                holodexApiService,
-                musicdexApiService,
-                authenticatedMusicdexApiService,
-                discoveryDao,
-                browseListCache,
-                searchListCache,
-                videoDao,
-                playlistDao,
-                appDatabase,
-                defaultDispatcher,
-                syncMetadataDao,
-                starredPlaylistDao,
-                tokenManager,
-                unifiedDao,
-                unifiedRepository,
-                applicationScope
-            )
-        }
+        // --- PROVIDERS (Manual construction) ---
 
+        // Helper to provide the new DAO
+        @Provides
+        fun provideSearchHistoryDao(db: AppDatabase) = db.searchHistoryDao()
+
+        // NOTE: providePlaylistRepository was DELETED.
+        // PlaylistRepository has an @Inject constructor, so Hilt creates it automatically.
 
         @Provides
         @Singleton
@@ -124,15 +76,6 @@ abstract class RepositoryModule {
         @Singleton
         fun provideUserPreferencesRepository(@ApplicationContext context: Context): UserPreferencesRepository {
             return UserPreferencesRepository(context.userPreferencesDataStore)
-        }
-
-        @Provides
-        @Singleton
-        fun provideSharedPreferencesSearchHistoryRepository(
-            sharedPreferences: SharedPreferences,
-            gson: Gson
-        ): SharedPreferencesSearchHistoryRepository {
-            return SharedPreferencesSearchHistoryRepository(sharedPreferences, gson, Dispatchers.IO)
         }
 
         @OptIn(UnstableApi::class)

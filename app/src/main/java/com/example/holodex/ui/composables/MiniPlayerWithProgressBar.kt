@@ -1,5 +1,3 @@
-// File: java/com/example/holodex/ui/composables/MiniPlayerWithProgressBar.kt
-
 package com.example.holodex.ui.composables
 
 import androidx.compose.animation.AnimatedVisibility
@@ -59,7 +57,6 @@ import com.example.holodex.viewmodel.rememberMiniPlayerArtistState
 import com.example.holodex.viewmodel.rememberMiniPlayerProgressState
 import com.example.holodex.viewmodel.rememberMiniPlayerQueueStateForButton
 import com.example.holodex.viewmodel.rememberMiniPlayerTitleState
-import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,9 +65,8 @@ fun MiniPlayerWithProgressBar(
     modifier: Modifier = Modifier,
     onTapped: () -> Unit = {}
 ) {
-    val uiState by playbackViewModel
-        .uiState
-        .collectAsStateWithLifecycle()
+    // State Collection
+    val uiState by playbackViewModel.uiState.collectAsStateWithLifecycle()
     val currentItem = uiState.currentItem
 
     val title by rememberMiniPlayerTitleState(playbackViewModel.uiState)
@@ -78,19 +74,27 @@ fun MiniPlayerWithProgressBar(
     val isPlaying by rememberIsPlayingState(playbackViewModel.uiState)
     val progressFraction by rememberMiniPlayerProgressState(playbackViewModel.uiState)
     val queueStatePair by rememberMiniPlayerQueueStateForButton(playbackViewModel.uiState)
-    // FIX 2: Deconstruct to ignore the unused variable
     val (_, canSkipNext) = queueStatePair
     val isLoading by rememberFullPlayerLoadingState(playbackViewModel.uiState)
 
-    // FIX 3: Simplify this check. If title is not null, an item exists.
-    val currentItemExists = title != null
+    // Local state to handle instant dismiss feedback
+    var isDismissedLocally by remember { mutableStateOf(false) }
 
-    var showPlayer by remember { mutableStateOf(true) }
+    // Logic: Show if there is an item AND we haven't swiped it away locally
+    val isVisible = currentItem != null && !isDismissedLocally
+
+    // If a NEW item plays, un-dismiss (e.g., user clicked play on a new song)
+    LaunchedEffect(currentItem?.id) {
+        if (currentItem != null) {
+            isDismissedLocally = false
+        }
+    }
 
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = {
             if (it == SwipeToDismissBoxValue.StartToEnd || it == SwipeToDismissBoxValue.EndToStart) {
-                showPlayer = false
+                isDismissedLocally = true // Instant UI update
+                playbackViewModel.clearCurrentQueue() // Async cleanup
                 true
             } else {
                 false
@@ -98,39 +102,25 @@ fun MiniPlayerWithProgressBar(
         }
     )
 
-    LaunchedEffect(showPlayer) {
-        if (!showPlayer) {
-            delay(300)
-            playbackViewModel.clearCurrentQueue()
-        }
-    }
-
-    LaunchedEffect(currentItem?.id) {
-        if (currentItem != null && !showPlayer) {
-            showPlayer = true
-            dismissState.reset()
-        }
-    }
-
-    if (!currentItemExists && !isLoading) {
-        Spacer(modifier = modifier.height(0.dp))
-        return
+    // Reset dismiss state if invisible to prepare for re-appearance
+    LaunchedEffect(isVisible) {
+        if (!isVisible) dismissState.reset()
     }
 
     AnimatedVisibility(
-        visible = showPlayer,
-        exit = shrinkVertically() + fadeOut()
+        visible = isVisible,
+        exit = shrinkVertically() + fadeOut(),
+        modifier = modifier
     ) {
         SwipeToDismissBox(
             state = dismissState,
             backgroundContent = {},
-            modifier = modifier
         ) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(IntrinsicSize.Min)
-                    .clickable(onClick = onTapped, enabled = currentItemExists),
+                    .clickable(onClick = onTapped),
                 color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
                 tonalElevation = 3.dp,
                 shadowElevation = 3.dp
@@ -139,16 +129,12 @@ fun MiniPlayerWithProgressBar(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(
-                                start = 8.dp,
-                                end = 4.dp,
-                                top = 8.dp,
-                                bottom = 8.dp
-                            ),
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Artwork
                         val miniPlayerArtworkUrls = remember(currentItem) {
-                            generateArtworkUrlList(currentItem, ThumbnailQuality.HIGH)
+                            generateArtworkUrlList(currentItem, ThumbnailQuality.LOW)
                         }
 
                         AsyncImage(
@@ -157,6 +143,7 @@ fun MiniPlayerWithProgressBar(
                                 .placeholder(R.drawable.ic_default_album_art_placeholder)
                                 .error(R.drawable.ic_error_image)
                                 .crossfade(true)
+                                .size(100, 100)
                                 .build(),
                             contentDescription = stringResource(R.string.content_desc_album_art),
                             contentScale = ContentScale.Crop,
@@ -168,6 +155,7 @@ fun MiniPlayerWithProgressBar(
 
                         Spacer(modifier = Modifier.width(12.dp))
 
+                        // Text
                         Column(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.Center
@@ -179,7 +167,6 @@ fun MiniPlayerWithProgressBar(
                                 overflow = TextOverflow.Ellipsis,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            // FIX 1: Use `let` to create a local, smart-casted variable
                             artist?.let { artistText ->
                                 Text(
                                     text = artistText,
@@ -193,12 +180,13 @@ fun MiniPlayerWithProgressBar(
 
                         Spacer(modifier = Modifier.width(4.dp))
 
+                        // Controls
                         IconButton(
                             onClick = { playbackViewModel.togglePlayPause() },
-                            enabled = currentItemExists && !isLoading
+                            enabled = true
                         ) {
                             Icon(
-                                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                imageVector = if (isPlaying && !isLoading) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                                 contentDescription = if (isPlaying) stringResource(R.string.action_pause) else stringResource(R.string.action_play),
                                 modifier = Modifier.size(36.dp),
                                 tint = MaterialTheme.colorScheme.primary
@@ -207,7 +195,7 @@ fun MiniPlayerWithProgressBar(
 
                         IconButton(
                             onClick = { playbackViewModel.skipToNext() },
-                            enabled = canSkipNext && !isLoading
+                            enabled = canSkipNext
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.SkipNext,
@@ -218,9 +206,13 @@ fun MiniPlayerWithProgressBar(
                         }
                     }
 
-                    if (isLoading && !currentItemExists) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp))
-                    } else if (currentItemExists) {
+                    // Progress Indicator
+                    if (isLoading) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().height(2.dp),
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    } else {
                         LinearProgressIndicator(
                             progress = { progressFraction },
                             modifier = Modifier.fillMaxWidth().height(2.dp),

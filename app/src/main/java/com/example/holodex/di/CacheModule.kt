@@ -6,10 +6,6 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
-import com.example.holodex.data.cache.BrowseListCache
-import com.example.holodex.data.cache.SearchListCache
-import com.example.holodex.data.db.BrowsePageDao
-import com.example.holodex.data.db.SearchPageDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -22,17 +18,6 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object CacheModule {
 
-    @Provides
-    @Singleton
-    fun provideBrowseListCache(browsePageDao: BrowsePageDao): BrowseListCache {
-        return BrowseListCache(browsePageDao)
-    }
-
-    @Provides
-    @Singleton
-    fun provideSearchListCache(searchPageDao: SearchPageDao): SearchListCache {
-        return SearchListCache(searchPageDao)
-    }
 
     @Provides
     @Singleton

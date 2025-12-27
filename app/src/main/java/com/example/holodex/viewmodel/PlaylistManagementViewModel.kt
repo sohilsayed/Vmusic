@@ -13,7 +13,7 @@ import com.example.holodex.data.db.PlaylistItemEntity
 import com.example.holodex.data.db.StarredPlaylistEntity
 import com.example.holodex.data.db.SyncStatus
 import com.example.holodex.data.model.discovery.PlaylistStub
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.PlaylistRepository
 import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.util.PlaylistFormatter
@@ -46,7 +46,7 @@ data class PendingPlaylistItemDetails(
 @HiltViewModel
 class PlaylistManagementViewModel @Inject constructor(
     private val application: Application,
-    private val holodexRepository: HolodexRepository,
+    private val playlistRepository: PlaylistRepository,
     private val unifiedRepository: UnifiedVideoRepository
 ) : ViewModel() {
 
@@ -56,8 +56,8 @@ class PlaylistManagementViewModel @Inject constructor(
         const val DOWNLOADS_PLAYLIST_ID = -200L
     }
 
-    private val userCreatedPlaylists: Flow<List<PlaylistEntity>> = holodexRepository.getAllPlaylists()
-    private val starredPlaylists: Flow<List<StarredPlaylistEntity>> = holodexRepository.getStarredPlaylistsFlow()
+    private val userCreatedPlaylists: Flow<List<PlaylistEntity>> = playlistRepository.getAllPlaylists()
+    private val starredPlaylists: Flow<List<StarredPlaylistEntity>> = playlistRepository.getStarredPlaylistsFlow()
 
     // Migration: Use Unified Display Items instead of legacy DownloadedItemEntity
     private val downloadsFlow: Flow<List<UnifiedDisplayItem>> = unifiedRepository.getDownloads()
@@ -126,7 +126,7 @@ class PlaylistManagementViewModel @Inject constructor(
         )
 
     // Used for the "Select Playlist" dialog (excludes synthetic lists)
-    val userPlaylists: StateFlow<List<PlaylistEntity>> = holodexRepository.getAllPlaylists()
+    val userPlaylists: StateFlow<List<PlaylistEntity>> = playlistRepository.getAllPlaylists()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000L),
@@ -185,10 +185,10 @@ class PlaylistManagementViewModel @Inject constructor(
                         syncStatus = SyncStatus.DIRTY,
                         last_modified_at = Instant.now().toString()
                     )
-                    holodexRepository.playlistDao.updatePlaylist(updatedPlaylist)
+                    playlistRepository.playlistDao.updatePlaylist(updatedPlaylist)
                 }
 
-                val lastOrder = holodexRepository.getLastItemOrderInPlaylist(playlist.playlistId)
+                val lastOrder = playlistRepository.getLastItemOrderInPlaylist(playlist.playlistId)
                 val newOrder = (lastOrder ?: -1) + 1
 
                 val playlistItemEntity = PlaylistItemEntity(
@@ -212,7 +212,7 @@ class PlaylistManagementViewModel @Inject constructor(
                     syncStatus = SyncStatus.DIRTY
                 )
 
-                holodexRepository.addPlaylistItem(playlistItemEntity)
+                playlistRepository.addPlaylistItem(playlistItemEntity)
                 Toast.makeText(application, "'${pendingItem.titleForDisplay}' added to ${playlist.name}", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Timber.e(e, "Failed to add item to playlist ${playlist.name}")
@@ -238,7 +238,7 @@ class PlaylistManagementViewModel @Inject constructor(
         val currentPendingItem = _pendingItemForPlaylist.value
         viewModelScope.launch {
             try {
-                val newPlaylistId = holodexRepository.createNewPlaylist(playlistName, description?.trim())
+                val newPlaylistId = playlistRepository.createNewPlaylist(playlistName, description?.trim())
                 Toast.makeText(application, "Playlist '$playlistName' created", Toast.LENGTH_SHORT).show()
                 _showCreatePlaylistDialog.value = false
 
@@ -279,7 +279,7 @@ class PlaylistManagementViewModel @Inject constructor(
         }
         viewModelScope.launch {
             try {
-                holodexRepository.deletePlaylist(idToDelete)
+                playlistRepository.deletePlaylist(idToDelete)
                 Toast.makeText(application, "Playlist deleted", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Timber.e(e, "Failed to delete playlist ID: $idToDelete")

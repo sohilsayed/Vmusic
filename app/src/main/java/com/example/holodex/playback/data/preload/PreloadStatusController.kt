@@ -16,7 +16,9 @@ class PreloadStatusController(
         private const val TAG = "PreloadStatusController"
     }
 
-    override fun getTargetPreloadStatus(rankingData: Int): DefaultPreloadManager.PreloadStatus? {
+    override fun getTargetPreloadStatus(
+        rankingData: Int
+    ): DefaultPreloadManager.PreloadStatus {
         val currentIndex = getCurrentIndex()
         val ranking = rankingData - currentIndex
 
@@ -30,7 +32,7 @@ class PreloadStatusController(
                 DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(preloadDurationMs / 2)
             }
             else -> {
-                null
+                DefaultPreloadManager.PreloadStatus.PRELOAD_STATUS_NOT_PRELOADED
             }
         }
     }

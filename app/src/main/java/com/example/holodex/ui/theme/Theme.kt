@@ -1,5 +1,6 @@
 package com.example.holodex.ui.theme
 
+import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -11,12 +12,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.holodex.data.ThemePreference // <--- Import this
+import com.example.holodex.data.ThemePreference
 import com.example.holodex.viewmodel.SettingsViewModel
-import com.google.accompanist.systemuicontroller.rememberSystemUiController
-import org.orbitmvi.orbit.compose.collectAsState // <--- Import this
+import org.orbitmvi.orbit.compose.collectAsState
 
 // ... (Keep AppDarkColorScheme and AppLightColorScheme definitions as they are) ...
 private val AppDarkColorScheme = darkColorScheme(
@@ -83,16 +86,15 @@ private val AppLightColorScheme = lightColorScheme(
     scrim = md_theme_light_scrim,
 )
 
+
 @Composable
 fun HolodexMusicTheme(
     settingsViewModel: SettingsViewModel = hiltViewModel(),
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    // FIX: Collect state from Orbit
     val state by settingsViewModel.collectAsState()
 
-    // FIX: Access property from state (renamed to currentTheme)
     val useDarkTheme = when (state.currentTheme) {
         ThemePreference.LIGHT -> false
         ThemePreference.DARK -> true
@@ -108,17 +110,21 @@ fun HolodexMusicTheme(
         else -> AppLightColorScheme
     }
 
-    val systemUiController = rememberSystemUiController()
-    SideEffect {
-        systemUiController.setStatusBarColor(
-            color = Color.Transparent,
-            darkIcons = !useDarkTheme
-        )
-        systemUiController.setNavigationBarColor(
-            color = Color.Transparent,
-            darkIcons = !useDarkTheme,
-            navigationBarContrastEnforced = false
-        )
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+
+            // FIX: Make Status Bar & Navigation Bar Transparent
+            window.statusBarColor = Color.Transparent.toArgb()
+            window.navigationBarColor = Color.Transparent.toArgb()
+
+            // Handle Icon Colors (Dark icons on light background, Light icons on dark background)
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !useDarkTheme
+                isAppearanceLightNavigationBars = !useDarkTheme
+            }
+        }
     }
 
     MaterialTheme(

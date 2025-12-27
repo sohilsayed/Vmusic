@@ -17,20 +17,17 @@ import com.example.holodex.playback.data.model.PlaybackStateEntity
         // --- NEW UNIFIED ENTITIES ---
         UnifiedMetadataEntity::class,
         UserInteractionEntity::class,
+        PlaybackHistoryEntity::class,
         PlaybackStateEntity::class,
         PlaybackQueueRefEntity::class,
-        CachedVideoEntity::class,
-        CachedSongEntity::class,
         PlaylistEntity::class,
         PlaylistItemEntity::class,
-        CachedBrowsePage::class,
-        CachedSearchPage::class,
         ParentVideoMetadataEntity::class,
-        CachedDiscoveryResponse::class,
         SyncMetadataEntity::class,
-        StarredPlaylistEntity::class
+        StarredPlaylistEntity::class,
+                SearchHistoryEntity::class
     ],
-    version = 26, // INCREMENTED VERSION
+    version = 29, // INCREMENTED VERSION
     exportSchema = true
 )
 @TypeConverters(
@@ -39,22 +36,18 @@ import com.example.holodex.playback.data.model.PlaybackStateEntity
     HolodexVideoItemListConverter::class,
     StringListConverter::class,
     DiscoveryResponseConverter::class,
-    SyncStatusConverter::class
+    SyncStatusConverter::class,
 )
 abstract class AppDatabase : RoomDatabase() {
 
     // --- NEW DAO ---
     abstract fun unifiedDao(): UnifiedDao
     abstract fun playlistDao(): PlaylistDao
-    abstract fun browsePageDao(): BrowsePageDao
-    abstract fun searchPageDao(): SearchPageDao
     abstract fun parentVideoMetadataDao(): ParentVideoMetadataDao
-    abstract fun videoDao(): VideoDao
-    abstract fun discoveryDao(): DiscoveryDao
     abstract fun syncMetadataDao(): SyncMetadataDao
     abstract fun starredPlaylistDao(): StarredPlaylistDao
     abstract fun playbackDao(): PlaybackDao
-
+    abstract fun searchHistoryDao(): SearchHistoryDao
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -265,7 +258,45 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_playback_queue_ref_item_id` ON `playback_queue_ref` (`item_id`)")
             }
         }
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. Create Playback History Table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `playback_history` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, 
+                        `itemId` TEXT NOT NULL, 
+                        `timestamp` INTEGER NOT NULL,
+                        FOREIGN KEY(`itemId`) REFERENCES `unified_metadata`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """)
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_playback_history_itemId` ON `playback_history` (`itemId`)")
 
+                // 2. Migrate existing history from interactions
+                // This converts the "Sync" style history to "Log" style history
+                db.execSQL("""
+                    INSERT INTO playback_history (itemId, timestamp)
+                    SELECT itemId, timestamp FROM user_interactions 
+                    WHERE interactionType = 'HISTORY'
+                """)
+
+                // 3. Clean up old history interactions
+                db.execSQL("DELETE FROM user_interactions WHERE interactionType = 'HISTORY'")
+            }
+        }
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `videos`")
+                db.execSQL("DROP TABLE IF EXISTS `songs`")
+                db.execSQL("DROP TABLE IF EXISTS `cached_browse_pages`")
+                db.execSQL("DROP TABLE IF EXISTS `cached_search_pages`")
+                db.execSQL("DROP TABLE IF EXISTS `cached_discovery_responses`")
+            }
+        }
+        val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `search_history` (`query` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, PRIMARY KEY(`query`))")
+            }
+        }
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -281,7 +312,10 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_22_23,
                         MIGRATION_23_24,
                         MIGRATION_24_25,
-                        MIGRATION_25_26
+                        MIGRATION_25_26,
+                        MIGRATION_26_27,
+                        MIGRATION_27_28,
+                        MIGRATION_28_29
                     )
                     .build()
                 INSTANCE = instance

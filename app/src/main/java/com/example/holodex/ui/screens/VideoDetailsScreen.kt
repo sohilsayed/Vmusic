@@ -1,12 +1,9 @@
-// File: java/com/example/holodex/ui/screens/VideoDetailsScreen.kt
-// File: java/com/example/holodex/ui/screens/VideoDetailsScreen.kt
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
-
 package com.example.holodex.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +11,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,6 +52,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +60,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -72,19 +73,20 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.holodex.R
-import com.example.holodex.data.model.HolodexVideoItem
+import com.example.holodex.data.model.discovery.ChannelDetails
+import com.example.holodex.domain.action.GlobalMediaActionHandler
 import com.example.holodex.ui.composables.ErrorStateWithRetry
 import com.example.holodex.ui.composables.LoadingState
 import com.example.holodex.ui.composables.SimpleProcessedBackground
 import com.example.holodex.ui.composables.UnifiedListItem
 import com.example.holodex.util.DynamicTheme
 import com.example.holodex.util.ThumbnailQuality
-import com.example.holodex.util.findActivity
-import com.example.holodex.util.getYouTubeThumbnailUrl
+import com.example.holodex.util.generateArtworkUrlList
 import com.example.holodex.viewmodel.FavoritesViewModel
-import com.example.holodex.viewmodel.PlaylistManagementViewModel
+import com.example.holodex.viewmodel.UnifiedDisplayItem
 import com.example.holodex.viewmodel.VideoDetailsViewModel
-import com.example.holodex.viewmodel.VideoListViewModel
+import com.example.holodex.viewmodel.mappers.toPlaybackItem
+import kotlinx.coroutines.launch
 import org.orbitmvi.orbit.compose.collectAsState
 
 @UnstableApi
@@ -93,35 +95,34 @@ import org.orbitmvi.orbit.compose.collectAsState
 fun VideoDetailsScreen(
     navController: NavController,
     onNavigateUp: () -> Unit,
+    contentPadding: PaddingValues,
+    actionHandler: GlobalMediaActionHandler = hiltViewModel()
 ) {
     val videoDetailsViewModel: VideoDetailsViewModel = hiltViewModel()
-    // *** THE FIX: Get the activity-scoped ViewModel here ***
-    val videoListViewModel: VideoListViewModel = hiltViewModel(findActivity())
     val favoritesViewModel: FavoritesViewModel = hiltViewModel()
-    val playlistManagementViewModel: PlaylistManagementViewModel = hiltViewModel(findActivity())
 
-    // Call the initialize function once when the screen is first composed.
-    LaunchedEffect(Unit) {
-        videoDetailsViewModel.initialize(videoListViewModel)
-    }
-
-    val videoDetails by videoDetailsViewModel.videoDetails.collectAsStateWithLifecycle()
-    val favoritesState by favoritesViewModel.collectAsState()
+    val videoItem by videoDetailsViewModel.videoItem.collectAsStateWithLifecycle()
+    val songItems by videoDetailsViewModel.songItems.collectAsStateWithLifecycle()
     val isLoading by videoDetailsViewModel.isLoading.collectAsStateWithLifecycle()
     val error by videoDetailsViewModel.error.collectAsStateWithLifecycle()
     val transientMessage by videoDetailsViewModel.transientMessage.collectAsStateWithLifecycle()
+    val dynamicTheme by videoDetailsViewModel.dynamicTheme.collectAsStateWithLifecycle()
+    val favoritesState by favoritesViewModel.collectAsState()
+
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
-    val dynamicTheme by videoDetailsViewModel.dynamicTheme.collectAsStateWithLifecycle()
+    val coroutineScope = rememberCoroutineScope()
 
-    val backgroundImageUrl by remember(videoDetails) {
-        derivedStateOf { videoDetails?.id?.let { getYouTubeThumbnailUrl(it, ThumbnailQuality.MAX).firstOrNull() } }
+    val backgroundImageUrl by remember(videoItem) {
+        derivedStateOf { videoItem?.artworkUrls?.firstOrNull() }
     }
 
     LaunchedEffect(error) {
         error?.let {
-            snackbarHostState.showSnackbar(message = it, duration = SnackbarDuration.Long)
-            videoDetailsViewModel.clearError()
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar(message = it, duration = SnackbarDuration.Long)
+                videoDetailsViewModel.clearError()
+            }
         }
     }
     LaunchedEffect(transientMessage) {
@@ -135,23 +136,36 @@ fun VideoDetailsScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text(text = videoDetails?.title ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                    Text(
+                        text = videoItem?.title ?: "",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateUp) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 actions = {
-                    videoDetails?.let { video ->
-                        // *** FIX 1: Check Unified Favorites Map ***
-                        // The channel ID is the key in the map.
-                        val channelId = video.channel.id ?: ""
-                        val isFavorited = favoritesState.likedItemsMap.containsKey(channelId)
+                    videoItem?.let { video ->
+                        val isFavorited = favoritesState.likedItemsMap.containsKey(video.channelId)
 
                         IconButton(onClick = {
-                            // *** FIX 2: Call the overload that accepts HolodexVideoItem ***
-                            // (We already added this overload in FavoritesViewModel previously)
-                            favoritesViewModel.toggleFavoriteChannel(video)
+                            val channelInfo = ChannelDetails(
+                                id = video.channelId,
+                                name = video.artistText,
+                                englishName = null,
+                                description = null,
+                                photoUrl = null,
+                                bannerUrl = null,
+                                org = if(video.isExternal) "External" else null,
+                                suborg = null,
+                                twitter = null,
+                                group = null
+                            )
+                            favoritesViewModel.toggleFavoriteChannel(channelInfo)
                         }) {
                             Icon(
                                 imageVector = if (isFavorited) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -171,21 +185,34 @@ fun VideoDetailsScreen(
         }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
-            SimpleProcessedBackground(artworkUri = backgroundImageUrl, dynamicColor = dynamicTheme.primary)
+            SimpleProcessedBackground(
+                artworkUri = backgroundImageUrl,
+                dynamicColor = dynamicTheme.primary
+            )
+
             CompositionLocalProvider(LocalContentColor provides dynamicTheme.onPrimary) {
-                Box(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
+                Box(modifier = Modifier
+                    .padding(top = paddingValues.calculateTopPadding())
+                    .fillMaxSize()) {
+
                     when {
-                        isLoading && videoDetails == null -> LoadingState(message = stringResource(R.string.loading_content_message))
-                        error != null && videoDetails == null -> ErrorStateWithRetry(
-                            message = error!!,
-                            onRetry = { videoDetailsViewModel.initialize(videoListViewModel) } // Use initialize for retry
-                        )
-                        videoDetails != null -> {
+                        isLoading && videoItem == null -> {
+                            LoadingState(message = stringResource(R.string.loading_content_message))
+                        }
+                        error != null && videoItem == null -> {
+                            ErrorStateWithRetry(
+                                message = error!!,
+                                onRetry = { }
+                            )
+                        }
+                        videoItem != null -> {
                             VideoDetailsContent(
+                                videoItem = videoItem!!,
+                                songItems = songItems,
                                 videoDetailsViewModel = videoDetailsViewModel,
-                                navController = navController,
-                                playlistManagementViewModel = playlistManagementViewModel,
-                                dynamicTheme = dynamicTheme
+                                actionHandler = actionHandler,
+                                dynamicTheme = dynamicTheme,
+                                contentPadding = contentPadding
                             )
                         }
                     }
@@ -198,32 +225,39 @@ fun VideoDetailsScreen(
 @UnstableApi
 @Composable
 private fun VideoDetailsContent(
-    navController: NavController,
+    videoItem: UnifiedDisplayItem,
+    songItems: List<UnifiedDisplayItem>,
     videoDetailsViewModel: VideoDetailsViewModel,
-    playlistManagementViewModel: PlaylistManagementViewModel,
-    dynamicTheme: DynamicTheme
+    actionHandler: GlobalMediaActionHandler,
+    dynamicTheme: DynamicTheme,
+    contentPadding: PaddingValues
 ) {
-    val videoItem by videoDetailsViewModel.videoDetails.collectAsStateWithLifecycle()
-    val songItems by videoDetailsViewModel.unifiedSongItems.collectAsStateWithLifecycle()
+    val layoutDirection = LocalLayoutDirection.current
+    val effectivePadding = PaddingValues(
+        top = 0.dp,
+        start = contentPadding.calculateStartPadding(layoutDirection),
+        end = contentPadding.calculateEndPadding(layoutDirection),
+        bottom = contentPadding.calculateBottomPadding() + 16.dp
+    )
 
-    val videoListViewModel: VideoListViewModel = hiltViewModel(findActivity())
-    val favoritesViewModel: FavoritesViewModel = hiltViewModel()
-
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = effectivePadding
+    ) {
+        // 1. Header
         item {
-            videoItem?.let {
-                VideoDetailsHeader(
-                    videoItem = it,
-                    songCount = songItems.size,
-                    onPlayAll = { videoDetailsViewModel.playAllSegments() },
-                    onAddToQueue = { videoDetailsViewModel.addAllSegmentsToQueue() },
-                    onDownloadAll = { videoDetailsViewModel.downloadAllSegments() },
-                    dynamicTheme = dynamicTheme
-                )
-            }
+            VideoDetailsHeader(
+                videoItem = videoItem,
+                songCount = songItems.size,
+                onPlayAll = { videoDetailsViewModel.playAllSegments() },
+                onAddToQueue = { videoDetailsViewModel.addAllSegmentsToQueue() },
+                onDownloadAll = { videoDetailsViewModel.downloadAllSegments() },
+                dynamicTheme = dynamicTheme
+            )
             HorizontalDivider(color = LocalContentColor.current.copy(alpha = 0.2f))
         }
 
+        // 2. Song List
         if (songItems.isNotEmpty()) {
             itemsIndexed(
                 songItems,
@@ -231,44 +265,51 @@ private fun VideoDetailsContent(
             ) { index, songItem ->
                 UnifiedListItem(
                     item = songItem,
-                    onItemClicked = { videoDetailsViewModel.playSegment(index) },
-                    navController = navController,
-                    videoListViewModel = videoListViewModel,
-                    favoritesViewModel = favoritesViewModel,
-                    playlistManagementViewModel = playlistManagementViewModel
+                    actions = actionHandler,
+                    enableMarquee = true,
+                    onItemClick = {
+                        actionHandler.onPlay(songItems, index)
+                    }
                 )
             }
         } else {
-            // Display empty state only if the parent video has finished loading
-            if (videoItem != null && !videoDetailsViewModel.isLoading.value) {
-                item { EmptyStateMessage() }
+            item {
+                EmptyStateMessage()
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun VideoDetailsHeader(
-    videoItem: HolodexVideoItem,
+    videoItem: UnifiedDisplayItem,
     songCount: Int,
     onPlayAll: () -> Unit,
     onAddToQueue: () -> Unit,
     onDownloadAll: () -> Unit,
     dynamicTheme: DynamicTheme
 ) {
-    val thumbnailUrls = remember(videoItem.id) {
-        getYouTubeThumbnailUrl(videoItem.id, ThumbnailQuality.MAX)
+    // FIX: Generate High-Res artwork list specifically for the Header
+    val highResArtworkUrls = remember(videoItem) {
+        val tempPlaybackItem = videoItem.toPlaybackItem()
+        generateArtworkUrlList(tempPlaybackItem, ThumbnailQuality.MAX)
     }
-    var currentUrlIndex by remember(thumbnailUrls) { mutableIntStateOf(0) }
+
+    var currentUrlIndex by remember(highResArtworkUrls) { mutableIntStateOf(0) }
 
     Column(modifier = Modifier.padding(16.dp)) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
-                .data(thumbnailUrls.getOrNull(currentUrlIndex))
+                .data(highResArtworkUrls.getOrNull(currentUrlIndex))
                 .placeholder(R.drawable.ic_placeholder_image)
                 .error(R.drawable.ic_error_image)
                 .crossfade(true).build(),
-            onError = { if (currentUrlIndex < thumbnailUrls.lastIndex) currentUrlIndex++ },
+            onError = {
+                if (currentUrlIndex < highResArtworkUrls.lastIndex) {
+                    currentUrlIndex++
+                }
+            },
             contentDescription = stringResource(R.string.video_thumbnail_description),
             contentScale = ContentScale.Crop,
             modifier = Modifier
@@ -276,26 +317,50 @@ private fun VideoDetailsHeader(
                 .aspectRatio(16f / 9f)
                 .clip(MaterialTheme.shapes.medium)
         )
+
         Spacer(Modifier.height(16.dp))
-        Text(videoItem.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Medium)
+
+        Text(
+            text = videoItem.title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Medium,
+            color = Color.White,
+            maxLines = 1,
+            modifier = Modifier.basicMarquee()
+        )
+
         Spacer(Modifier.height(4.dp))
-        Text(videoItem.channel.name, style = MaterialTheme.typography.titleMedium)
+
+        Text(
+            text = videoItem.artistText,
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White.copy(alpha = 0.9f),
+            maxLines = 1,
+            modifier = Modifier.basicMarquee()
+        )
+
         if (songCount > 0) {
             Spacer(Modifier.height(4.dp))
             Text(
                 text = pluralStringResource(R.plurals.song_count, songCount, songCount),
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.7f)
             )
         }
+
         Spacer(Modifier.height(16.dp))
+
         if (songCount > 0) {
+            // FIX: Pass Color.White to the ActionButtons call
             ActionButtons(
                 onPlayAll = onPlayAll,
                 onAddToQueue = onAddToQueue,
                 onDownloadAll = onDownloadAll,
-                dynamicTheme = dynamicTheme
+                dynamicTheme = dynamicTheme,
+                forcedContentColor = Color.White
             )
         }
+
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -305,14 +370,15 @@ private fun ActionButtons(
     onPlayAll: () -> Unit,
     onAddToQueue: () -> Unit,
     onDownloadAll: () -> Unit,
-    dynamicTheme: DynamicTheme
+    dynamicTheme: DynamicTheme,
+    forcedContentColor: Color // FIX: Added this parameter
 ) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
             onClick = onPlayAll,
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
-                containerColor = dynamicTheme.onPrimary,
+                containerColor = forcedContentColor,
                 contentColor = dynamicTheme.primary
             )
         ) {
@@ -320,25 +386,26 @@ private fun ActionButtons(
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.action_play_all))
         }
+
         OutlinedButton(
             onClick = onAddToQueue,
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = dynamicTheme.onPrimary),
-            border = BorderStroke(1.dp, dynamicTheme.onPrimary.copy(alpha = 0.5f))
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = forcedContentColor),
+            border = BorderStroke(1.dp, forcedContentColor.copy(alpha = 0.5f))
         ) {
             Icon(Icons.AutoMirrored.Filled.QueueMusic, null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.action_add_to_queue_short))
         }
+
         IconButton(
             onClick = onDownloadAll,
-            colors = IconButtonDefaults.iconButtonColors(contentColor = dynamicTheme.onPrimary)
+            colors = IconButtonDefaults.iconButtonColors(contentColor = forcedContentColor)
         ) {
             Icon(Icons.Filled.Download, stringResource(R.string.action_download_all))
         }
     }
 }
-
 
 @Composable
 private fun EmptyStateMessage() {

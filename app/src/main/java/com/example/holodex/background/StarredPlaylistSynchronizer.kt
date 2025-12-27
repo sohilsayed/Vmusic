@@ -1,11 +1,11 @@
 // File: java/com/example/holodex/background/StarredPlaylistSynchronizer.kt (NEW FILE)
 package com.example.holodex.background
 
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.PlaylistRepository
 import javax.inject.Inject
 
 class StarredPlaylistSynchronizer @Inject constructor(
-    private val repository: HolodexRepository,
+    private val repository: PlaylistRepository,
     private val logger: SyncLogger
 ) : ISynchronizer {
     override val name: String = "STARRED_PLAYLISTS"

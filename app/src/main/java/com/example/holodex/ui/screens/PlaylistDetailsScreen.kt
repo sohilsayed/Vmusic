@@ -71,6 +71,7 @@ import androidx.navigation.NavController
 import com.example.holodex.R
 import com.example.holodex.data.db.PlaylistEntity
 import com.example.holodex.data.model.discovery.PlaylistStub
+import com.example.holodex.domain.action.GlobalMediaActionHandler
 import com.example.holodex.ui.composables.EmptyState
 import com.example.holodex.ui.composables.ErrorStateWithRetry
 import com.example.holodex.ui.composables.LoadingState
@@ -97,7 +98,8 @@ fun PlaylistDetailsScreen(
     navController: NavController,
     onNavigateUp: () -> Unit,
     playlistManagementViewModel: PlaylistManagementViewModel,
-    contentPadding: PaddingValues = PaddingValues(0.dp) // NEW PARAMETER
+    contentPadding: PaddingValues,
+    actionHandler: GlobalMediaActionHandler
 ) {
     val playlistDetailsViewModel: PlaylistDetailsViewModel = hiltViewModel()
     val state by playlistDetailsViewModel.collectAsState()
@@ -115,8 +117,6 @@ fun PlaylistDetailsScreen(
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    val videoListViewModel: VideoListViewModel = hiltViewModel(findActivity())
-    val favoritesViewModel: FavoritesViewModel = hiltViewModel()
 
     val backgroundImageUrl by remember(items, playlistDetails) {
         derivedStateOf {
@@ -206,13 +206,9 @@ fun PlaylistDetailsScreen(
                                 items = items,
                                 playlistDetails = if (isEditMode) editablePlaylist else playlistDetails,
                                 isEditMode = isEditMode,
-                                navController = navController,
-                                videoListViewModel = videoListViewModel,
-                                favoritesViewModel = favoritesViewModel,
-                                playlistManagementViewModel = playlistManagementViewModel,
+                                actionHandler = actionHandler,
                                 playlistDetailsViewModel = playlistDetailsViewModel,
                                 dynamicTheme = dynamicTheme,
-                                // PASS THE PADDING HERE
                                 contentPadding = contentPadding
                             )
                         }
@@ -229,13 +225,10 @@ private fun PlaylistContent(
     items: List<UnifiedDisplayItem>,
     playlistDetails: PlaylistEntity?,
     isEditMode: Boolean,
-    navController: NavController,
-    videoListViewModel: VideoListViewModel,
-    favoritesViewModel: FavoritesViewModel,
-    playlistManagementViewModel: PlaylistManagementViewModel,
+    actionHandler: GlobalMediaActionHandler,
     playlistDetailsViewModel: PlaylistDetailsViewModel,
     dynamicTheme: DynamicTheme,
-    contentPadding: PaddingValues // NEW PARAMETER
+    contentPadding: PaddingValues
 ) {
     val lazyListState = rememberLazyListState()
     val reorderableState = rememberReorderableLazyListState(
@@ -283,14 +276,15 @@ private fun PlaylistContent(
             ReorderableItem(state = reorderableState, key = item.stableId, enabled = isEditMode) {
                 UnifiedListItem(
                     item = item,
-                    onItemClicked = { if (!isEditMode) playlistDetailsViewModel.playFromItem(item) },
-                    navController = navController,
-                    videoListViewModel = videoListViewModel,
-                    favoritesViewModel = favoritesViewModel,
-                    playlistManagementViewModel = playlistManagementViewModel,
+                    actions = actionHandler,
                     isEditing = isEditMode,
                     onRemoveClicked = { playlistDetailsViewModel.removeItemInEditMode(item) },
-                    dragHandleModifier = Modifier.longPressDraggableHandle()
+                    dragHandleModifier = Modifier.longPressDraggableHandle(),
+                    onItemClick = {
+                        if (!isEditMode) {
+                            actionHandler.onPlay(items, index)
+                        }
+                    }
                 )
             }
         }
@@ -354,7 +348,7 @@ private fun PlaylistHeader(
 }
 
 @Composable
-private fun ActionButtons(
+fun ActionButtons(
     onPlayAll: () -> Unit,
     onAddAllToQueue: () -> Unit,
     dynamicTheme: DynamicTheme

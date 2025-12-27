@@ -1,6 +1,7 @@
 package com.example.holodex.di
 
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.PlaylistRepository
+import com.example.holodex.data.repository.VideoRepository
 import com.example.holodex.playback.domain.usecase.AddItemsToQueueUseCase
 import com.example.holodex.playback.domain.usecase.AddOrFetchAndAddUseCase
 import com.example.holodex.playback.player.PlaybackController
@@ -23,7 +24,7 @@ object UseCaseModule {
 
     @Provides
     fun provideAddOrFetchAndAddUseCase(
-        repo: HolodexRepository,
+        repo: VideoRepository,
         addItemsUseCase: AddItemsToQueueUseCase
     ) = AddOrFetchAndAddUseCase(repo, addItemsUseCase)
 }

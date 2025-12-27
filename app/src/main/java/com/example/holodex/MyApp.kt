@@ -11,12 +11,16 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.util.UnstableApi
 import androidx.work.Configuration
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.annotation.ExperimentalCoilApi
+import com.example.holodex.background.CachePruningWorker
 import com.example.holodex.data.download.DownloadCompletionObserver
 import com.example.holodex.data.repository.DownloadRepository
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.PlaylistRepository
 import com.example.holodex.di.ApplicationScope
 import com.example.holodex.extractor.DownloaderImpl
 import dagger.hilt.android.HiltAndroidApp
@@ -44,7 +48,7 @@ class MyApp : Application(), ImageLoaderFactory, DefaultLifecycleObserver, Confi
     lateinit var workerFactory: HiltWorkerFactory
 
     @Inject
-    lateinit var holodexRepository: HolodexRepository
+    lateinit var playlistRepository: PlaylistRepository
 
     @Inject
     lateinit var downloadRepository: DownloadRepository
@@ -76,9 +80,21 @@ class MyApp : Application(), ImageLoaderFactory, DefaultLifecycleObserver, Confi
         createNotificationChannels()
         downloadCompletionObserver.initialize()
 
-        appScope.launch {
-            holodexRepository.cleanupExpiredCacheEntries()
-        }
+
+        val pruningRequest = PeriodicWorkRequestBuilder<CachePruningWorker>(1, TimeUnit.DAYS)
+            .setConstraints(
+                androidx.work.Constraints.Builder()
+                    .setRequiresDeviceIdle(true) // Only run when user isn't using phone
+                    .setRequiresBatteryNotLow(true)
+                    .build()
+            )
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "CachePruning",
+            ExistingPeriodicWorkPolicy.KEEP,
+            pruningRequest
+        )
 
         val downloaderOkHttpClient = OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
@@ -153,12 +169,7 @@ class MyApp : Application(), ImageLoaderFactory, DefaultLifecycleObserver, Confi
                 allSuccess = false
             }
 
-            try {
-                holodexRepository.clearAllCachedData()
-            } catch (e: Exception) {
-                Timber.e(e, "Error clearing repository data.")
-                allSuccess = false
-            }
+
 
             callback(allSuccess)
 

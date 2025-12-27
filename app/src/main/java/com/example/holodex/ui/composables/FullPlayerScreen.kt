@@ -7,9 +7,9 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -19,9 +19,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,12 +57,12 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistRemove
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -85,7 +83,6 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -95,19 +92,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -121,8 +112,7 @@ import com.example.holodex.R
 import com.example.holodex.playback.domain.model.PlaybackItem
 import com.example.holodex.playback.util.formatDurationSecondsToString
 import com.example.holodex.ui.navigation.AppDestinations
-import com.example.holodex.util.ThumbnailQuality
-import com.example.holodex.util.generateArtworkUrlList
+import com.example.holodex.util.getHighResArtworkUrl
 import com.example.holodex.viewmodel.FavoritesViewModel
 import com.example.holodex.viewmodel.FullPlayerViewModel
 import com.example.holodex.viewmodel.PlaybackViewModel
@@ -136,16 +126,12 @@ import kotlinx.coroutines.launch
 import org.orbitmvi.orbit.compose.collectAsState
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
-import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
 private object FullPlayerDefaults {
-    const val VOLUME_SWIPE_SENSITIVITY_FACTOR = 0.005f
-    const val HORIZONTAL_SWIPE_THRESHOLD_PX = 50f
-    val ArtworkShape = RoundedCornerShape(16.dp)
-    const val ARTWORK_ANIMATION_DURATION_MS = 250
+    val ArtworkShape = RoundedCornerShape(12.dp)
     const val VOLUME_SLIDER_AUTO_HIDE_DELAY_MS = 3000L
-    const val QUEUE_SHEET_MAX_HEIGHT_FACTOR = 0.7f
+    const val QUEUE_SHEET_MAX_HEIGHT_FACTOR = 0.6f
 }
 
 @Immutable
@@ -184,77 +170,44 @@ internal fun FullPlayerScreenContent(
     val playbackViewModel: PlaybackViewModel = hiltViewModel()
     val favoritesViewModel: FavoritesViewModel = hiltViewModel()
 
-    // State from ViewModels
+    // State Collection
+    val uiState by playbackViewModel.uiState.collectAsStateWithLifecycle()
     val isRadioMode by playbackViewModel.isRadioModeActive.collectAsStateWithLifecycle()
+
+    // Derived States (Selectors)
     val artworkUri by rememberFullPlayerArtworkState(playbackViewModel.uiState)
     val currentItem by rememberFullPlayerCurrentItemState(playbackViewModel.uiState)
     val isLoading by rememberFullPlayerLoadingState(playbackViewModel.uiState)
+    val progress by rememberFullPlayerProgressState(playbackViewModel.uiState)
     val queueInfo by rememberFullPlayerQueueInfoState(playbackViewModel.uiState)
     val (queueItems, currentIndexInQueue, isQueueNotEmpty) = queueInfo
-    val uiState by playbackViewModel.uiState.collectAsStateWithLifecycle()
-    val repeatMode = uiState.repeatMode
-    val shuffleMode = uiState.shuffleMode
-    val progress by rememberFullPlayerProgressState(playbackViewModel.uiState)
+
     val favoritesState by favoritesViewModel.collectAsState()
     val dynamicTheme by fullPlayerViewModel.dynamicTheme.collectAsStateWithLifecycle()
 
-    // Local state
+    // Local UI State
     var showVolumeSlider by remember { mutableStateOf(false) }
     var volumeSliderValue by remember { mutableFloatStateOf(0.7f) }
     var showLyricsView by remember { mutableStateOf(false) }
     var showQueueSheet by remember { mutableStateOf(false) }
 
-    // Animation state
-    val artworkScale = remember { Animatable(1f) }
-    val artworkAlpha = remember { Animatable(1f) }
-
-    // Animated colors based on dynamic theme
-    val animatedPrimaryColor by animateColorAsState(
-        dynamicTheme.primary,
-        label = "animated_primary_color",
-        animationSpec = tween(1200)
-    )
-    val animatedOnPrimaryColor by animateColorAsState(
-        dynamicTheme.onPrimary,
-        label = "animated_on_primary_color",
-        animationSpec = tween(500)
-    )
-
-    // Audio and haptic feedback
+    // System Services
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
-    val haptic = LocalHapticFeedback.current
 
-    // Computed states
+    // Logic: Is Liked?
     val isCurrentItemLiked = remember(currentItem, favoritesState.likedItemsMap) {
-        currentItem?.let { pbItem ->
-            val likeId = pbItem.id
-            favoritesState.likedItemsMap.containsKey(likeId)
-        } == true
+        currentItem?.let { favoritesState.likedItemsMap.containsKey(it.id) } == true
     }
 
     val queueSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Update theme when artwork changes
+    // Update Theme on Artwork Change
     LaunchedEffect(artworkUri) {
         fullPlayerViewModel.updateThemeFromArtwork(artworkUri)
     }
 
-    // Artwork transition animations
-    LaunchedEffect(currentItem?.id) {
-        if (currentItem != null) {
-            coroutineScope.launch {
-                artworkAlpha.animateTo(0.5f, tween(150))
-                artworkAlpha.animateTo(1f, tween(FullPlayerDefaults.ARTWORK_ANIMATION_DURATION_MS, easing = EaseOutCubic))
-            }
-            coroutineScope.launch {
-                artworkScale.animateTo(0.95f, tween(150))
-                artworkScale.animateTo(1f, tween(FullPlayerDefaults.ARTWORK_ANIMATION_DURATION_MS, easing = EaseOutCubic))
-            }
-        }
-    }
-
-    // Auto-hide volume slider
+    // Auto-hide Volume Slider
     LaunchedEffect(showVolumeSlider) {
         if (showVolumeSlider) {
             delay(FullPlayerDefaults.VOLUME_SLIDER_AUTO_HIDE_DELAY_MS)
@@ -262,28 +215,46 @@ internal fun FullPlayerScreenContent(
         }
     }
 
+    // --- OPTIMIZATION: Low Res Background URL ---
+    // We force a 100x100 request for the background blur.
+    // Blurring a 100px image is 100x faster than blurring a 1000px image and looks identical.
+    val backgroundArtworkUri = remember(artworkUri) {
+        if (artworkUri == null) null
+        else getHighResArtworkUrl(artworkUri, preferredSizeOverride = "400x400")
+    }
+
+    // --- ANIMATION: Breathing Artwork ---
+    val isPlaying = uiState.isPlaying
+    val artworkScaleAnimation by animateFloatAsState(
+        targetValue = if (isPlaying) 1.0f else 0.85f, // Shrink when paused
+        animationSpec = tween(durationMillis = 500, easing = EaseOutCubic),
+        label = "artwork_breathing"
+    )
+    val artworkElevation by animateFloatAsState(
+        targetValue = if (isPlaying) 20f else 4f, // Drop shadow change
+        animationSpec = tween(500), label = "elevation"
+    )
+
     Box(modifier = modifier.fillMaxSize()) {
-        // Background with dynamic theme
+        // 1. PERFORMANCE OPTIMIZED BACKGROUND
         SimpleProcessedBackground(
-            artworkUri = artworkUri,
+            artworkUri = backgroundArtworkUri, // Use Low-Res
             dynamicColor = dynamicTheme.primary
         )
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = animatedPrimaryColor.copy(alpha = 0.45f)
-        ) {}
 
+        // 2. FOREGROUND CONTENT
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
         ) {
+            // A. TOP BAR
             PlayerTopBar(
                 isLiked = isCurrentItemLiked,
                 isShowingLyrics = showLyricsView,
                 queueNotEmpty = isQueueNotEmpty,
                 isItemLoaded = currentItem != null,
-                iconTint = animatedOnPrimaryColor,
+                iconTint = Color.White, // Always white on dark/glassy background
                 onNavigateUp = actions.onNavigateUp,
                 onLikeToggle = { currentItem?.let { actions.onToggleLike(it) } },
                 onQueueClick = { coroutineScope.launch { showQueueSheet = true } },
@@ -294,90 +265,151 @@ internal fun FullPlayerScreenContent(
                 playbackViewModel = playbackViewModel
             )
 
-            Box(
+            // B. MAIN CONTENT (Art + Controls)
+            Column(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceEvenly
             ) {
-                if (showLyricsView) {
+                // ARTWORK or LYRICS
+                if (!showLyricsView) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = 36.dp,
+                                vertical = 24.dp
+                            ), // Increased padding for cleaner look
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // The Shadow & Scaling Container
+                        Box(
+                            modifier = Modifier
+                                .aspectRatio(1f)
+                                .graphicsLayer {
+                                    scaleX = artworkScaleAnimation
+                                    scaleY = artworkScaleAnimation
+                                    shadowElevation = artworkElevation.dp.toPx()
+                                    shape = FullPlayerDefaults.ArtworkShape
+                                    clip = true
+                                }
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            if (currentItem != null) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(artworkUri) // High-Res for Foreground
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = stringResource(R.string.content_desc_album_art),
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(80.dp)
+                                        .align(Alignment.Center),
+                                    tint = Color.White.copy(alpha = 0.5f)
+                                )
+                            }
+                        }
+                    }
+                } else {
                     LyricsView(
                         currentItem = currentItem,
-                        textColor = animatedOnPrimaryColor,
-                        modifier = Modifier.fillMaxSize().padding(16.dp)
+                        textColor = Color.White,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(16.dp)
                     )
-                } else {
-                    PlayerContent(
-                        currentItem = currentItem,
-                        trackInfoColor = animatedOnPrimaryColor,
+                }
+
+                // TITLE & ARTIST (Marquee)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 32.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = currentItem?.title ?: stringResource(R.string.loading_track),
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp
+                        ),
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier.basicMarquee() // Auto-scrolls long titles
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = currentItem?.artistText ?: "",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        color = Color.White.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier.basicMarquee() // Auto-scrolls long artists
+                    )
+                }
+
+                // CONTROLS
+                player?.let { validPlayer ->
+                    AnimatedVisibility(visible = showVolumeSlider && !showLyricsView) {
+                        VolumeSlider(
+                            value = volumeSliderValue,
+                            onValueChange = {
+                                volumeSliderValue = it
+                                val newVolumeInt = (it * maxVolume).roundToInt()
+                                audioManager.setStreamVolume(
+                                    AudioManager.STREAM_MUSIC,
+                                    newVolumeInt,
+                                    0
+                                )
+                            },
+                            thumbColor = Color.White,
+                            activeTrackColor = Color.White
+                        )
+                    }
+
+                    Media3PlayerControls(
+                        player = validPlayer,
+                        // Pass pure state, do not rely on player.* properties for UI logic
+                        isPlaying = uiState.isPlaying,
                         isLoading = isLoading,
-                        artworkScale = artworkScale.value,
-                        artworkAlpha = artworkAlpha.value,
-                        onHorizontalSwipe = { dragAmount ->
-                            if (dragAmount < -FullPlayerDefaults.HORIZONTAL_SWIPE_THRESHOLD_PX && isQueueNotEmpty) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                actions.onSkipToNext()
-                            } else if (dragAmount > FullPlayerDefaults.HORIZONTAL_SWIPE_THRESHOLD_PX && isQueueNotEmpty) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                actions.onSkipToPrevious()
-                            }
-                        },
-                        onVerticalSwipe = { deltaY ->
-                            val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                            val newVolume = (currentVolume - deltaY * FullPlayerDefaults.VOLUME_SWIPE_SENSITIVITY_FACTOR * maxVolume)
-                                .roundToInt().coerceIn(0, maxVolume)
-                            if (newVolume != currentVolume) {
-                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0)
-                                volumeSliderValue = newVolume.toFloat() / maxVolume
-                                if (!showVolumeSlider) showVolumeSlider = true
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            }
-                        },
-                        onDoubleTap = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            actions.onTogglePlayPause()
-                        },
-                        modifier = Modifier.fillMaxSize()
+                        progress = progress,
+                        shuffleMode = uiState.shuffleMode,
+                        repeatMode = uiState.repeatMode,
+                        isRadioMode = isRadioMode,
+                        onSeek = { actions.onSeekTo(it) },
+                        onScrubbingChange = { playbackViewModel.setScrubbing(it) },
+                        onPlayPause = actions.onTogglePlayPause,
+                        onSkipPrevious = actions.onSkipToPrevious,
+                        onSkipNext = actions.onSkipToNext,
+                        onToggleShuffle = actions.onToggleShuffleMode,
+                        onToggleRepeat = actions.onToggleRepeatMode,
+                        modifier = Modifier.padding(bottom = 24.dp)
                     )
                 }
-            }
-
-            player?.let { validPlayer ->
-                AnimatedVisibility(visible = showVolumeSlider && !showLyricsView) {
-                    VolumeSlider(
-                        value = volumeSliderValue,
-                        onValueChange = {
-                            volumeSliderValue = it
-                            val newVolumeInt = (it * maxVolume).roundToInt()
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolumeInt, 0)
-                        },
-                        thumbColor = animatedPrimaryColor,
-                        activeTrackColor = animatedOnPrimaryColor
-                    )
-                }
-
-                Media3PlayerControls(
-                    player = validPlayer,
-                    progress = progress,
-                    shuffleMode = shuffleMode,
-                    repeatMode = repeatMode,
-                    onSeek = { positionSec -> actions.onSeekTo(positionSec) },
-                    onScrubbingChange = { isScrubbing -> playbackViewModel.setScrubbing(isScrubbing) },
-                    primaryColor = animatedPrimaryColor,
-                    onPrimaryColor = animatedOnPrimaryColor,
-                    onPlayPause = actions.onTogglePlayPause,
-                    onSkipPrevious = actions.onSkipToPrevious,
-                    onSkipNext = actions.onSkipToNext,
-                    onToggleShuffle = actions.onToggleShuffleMode,
-                    isRadioMode = isRadioMode,
-                    onToggleRepeat = actions.onToggleRepeatMode
-                )
             }
         }
 
+        // QUEUE SHEET
         if (showQueueSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showQueueSheet = false },
-                sheetState = queueSheetState
+                sheetState = queueSheetState,
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrimColor = Color.Black.copy(alpha = 0.6f)
             ) {
                 Box(modifier = Modifier.fillMaxHeight(FullPlayerDefaults.QUEUE_SHEET_MAX_HEIGHT_FACTOR)) {
                     QueueSheetContent(
@@ -419,37 +451,49 @@ private fun PlayerTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onNavigateUp) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.content_desc_navigate_back), tint = iconTint)
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                stringResource(R.string.content_desc_navigate_back),
+                tint = iconTint
+            )
         }
         Spacer(Modifier.weight(1f))
 
         IconButton(onClick = onToggleLyrics) {
             Icon(
                 imageVector = if (isShowingLyrics) Icons.Filled.MusicNote else Icons.Filled.TextFields,
-                contentDescription = stringResource(if (isShowingLyrics) R.string.action_hide_lyrics else R.string.action_show_lyrics),
-                tint = iconTint
+                contentDescription = "Lyrics",
+                tint = iconTint.copy(alpha = if (isShowingLyrics) 1f else 0.7f)
             )
         }
 
         IconButton(onClick = onLikeToggle, enabled = isItemLoaded) {
             Icon(
                 imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                contentDescription = stringResource(if (isLiked) R.string.content_desc_unlike_button else R.string.content_desc_like_button),
-                tint = iconTint
+                contentDescription = "Like",
+                tint = if (isLiked) Color(0xFFE91E63) else iconTint // Pink for like
             )
         }
 
         IconButton(onClick = onQueueClick, enabled = queueNotEmpty) {
-            Icon(Icons.AutoMirrored.Filled.PlaylistPlay, stringResource(R.string.content_desc_view_queue), tint = iconTint)
+            Icon(
+                Icons.AutoMirrored.Filled.PlaylistPlay,
+                stringResource(R.string.content_desc_view_queue),
+                tint = iconTint
+            )
         }
 
         Box {
             IconButton(onClick = { showMoreOptionsDropdown = true }, enabled = isItemLoaded) {
-                Icon(Icons.Filled.MoreVert, stringResource(R.string.content_desc_more_options), tint = iconTint)
+                Icon(
+                    Icons.Filled.MoreVert,
+                    stringResource(R.string.content_desc_more_options),
+                    tint = iconTint
+                )
             }
             PlayerOverflowMenu(
                 expanded = showMoreOptionsDropdown,
@@ -486,6 +530,22 @@ private fun PlayerOverflowMenu(
             leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
             enabled = currentItem != null
         )
+
+        // --- NEW OPTION: GO TO VIDEO ---
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.action_view_video)) },
+            onClick = {
+                currentItem?.let { item ->
+                    navController.navigate(AppDestinations.videoDetailRoute(item.videoId))
+                    actions.onNavigateUp() // Close the Full Player sheet
+                }
+                onDismissRequest()
+            },
+            leadingIcon = { Icon(Icons.Filled.Movie, null) },
+            enabled = currentItem != null
+        )
+        // -------------------------------
+
         val artistChannelId = currentItem?.channelId
         DropdownMenuItem(
             text = { Text(stringResource(R.string.action_view_artist)) },
@@ -493,9 +553,12 @@ private fun PlayerOverflowMenu(
                 if (!artistChannelId.isNullOrBlank()) {
                     actions.onFindArtist(artistChannelId)
                     navController.navigate(AppDestinations.HOME_ROUTE) {
-                        popUpTo(navController.graph.startDestinationRoute ?: AppDestinations.HOME_ROUTE) { saveState = true }
+                        popUpTo(
+                            navController.graph.startDestinationRoute ?: AppDestinations.HOME_ROUTE
+                        ) { saveState = true }
                         launchSingleTop = true; restoreState = true
                     }
+                    actions.onNavigateUp() // Close the Full Player sheet
                 }
                 onDismissRequest()
             },
@@ -507,92 +570,16 @@ private fun PlayerOverflowMenu(
             onClick = {
                 playbackViewModel.getAudioSessionId()?.let {
                     if (it != 0) actions.onOpenAudioSettings(it)
-                    else Toast.makeText(context, R.string.error_no_audio_session, Toast.LENGTH_SHORT).show()
+                    else Toast.makeText(
+                        context,
+                        R.string.error_no_audio_session,
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
                 onDismissRequest()
             },
             leadingIcon = { Icon(Icons.Filled.Equalizer, null) }
         )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun PlayerContent(
-    modifier: Modifier = Modifier,
-    currentItem: PlaybackItem?,
-    trackInfoColor: Color,
-    isLoading: Boolean,
-    artworkScale: Float,
-    artworkAlpha: Float,
-    onHorizontalSwipe: (dragAmount: Float) -> Unit,
-    onVerticalSwipe: (deltaY: Float) -> Unit,
-    onDoubleTap: () -> Unit
-) {
-    val context = LocalContext.current
-
-    // Use onSizeChanged to determine artwork size based on parent container
-    var parentSize by remember { mutableStateOf(IntSize.Zero) }
-    val artworkSize = with(LocalDensity.current) { (parentSize.height * 0.4f).toDp() }
-
-    val artworkUrls = remember(currentItem) {
-        generateArtworkUrlList(currentItem, ThumbnailQuality.MAX)
-    }
-    var currentUrlIndex by remember(artworkUrls) { mutableIntStateOf(0) }
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 16.dp)
-            .onSizeChanged { parentSize = it },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceAround
-    ) {
-        Spacer(modifier = Modifier.height(artworkSize * 0.1f))
-        Box(
-            modifier = Modifier
-                .size(artworkSize)
-                .aspectRatio(1f)
-                .clip(FullPlayerDefaults.ArtworkShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                .graphicsLayer { scaleX = artworkScale; scaleY = artworkScale; alpha = artworkAlpha }
-                .combinedClickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onDoubleClick = onDoubleTap,
-                    onClick = {}
-                )
-                .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        if (dragAmount.y.absoluteValue > dragAmount.x.absoluteValue * 1.5) {
-                            onVerticalSwipe(dragAmount.y)
-                        } else {
-                            onHorizontalSwipe(dragAmount.x)
-                        }
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            if (isLoading && currentItem == null) {
-                CircularProgressIndicator()
-            } else {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(artworkUrls.getOrNull(currentUrlIndex))
-                        .placeholder(R.drawable.ic_default_album_art_placeholder)
-                        .error(R.drawable.ic_error_image)
-                        .crossfade(true).build(),
-                    contentDescription = stringResource(R.string.content_desc_album_art),
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    onError = { if (currentUrlIndex < artworkUrls.lastIndex) { currentUrlIndex++ } }
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(artworkSize * 0.15f))
-        TrackInfo(currentItem, trackInfoColor)
-        Spacer(modifier = Modifier.weight(1f))
     }
 }
 
@@ -624,7 +611,9 @@ private fun VolumeSlider(
         Slider(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
             valueRange = 0f..1f,
             colors = SliderDefaults.colors(
                 thumbColor = thumbColor,
@@ -644,7 +633,9 @@ private fun TrackInfo(currentItem: PlaybackItem?, textColor: Color) {
     ) { targetId ->
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
         ) {
             Text(
                 text = if (targetId == "loading" || currentItem == null) stringResource(R.string.loading_track) else currentItem.title,
@@ -659,7 +650,10 @@ private fun TrackInfo(currentItem: PlaybackItem?, textColor: Color) {
             Text(
                 text = if (targetId == "loading" || currentItem == null) "" else currentItem.artistText,
                 color = textColor.copy(alpha = 0.8f),
-                style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp, lineHeight = 20.sp),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 17.sp,
+                    lineHeight = 20.sp
+                ),
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -669,7 +663,11 @@ private fun TrackInfo(currentItem: PlaybackItem?, textColor: Color) {
 }
 
 @Composable
-private fun LyricsView(currentItem: PlaybackItem?, modifier: Modifier = Modifier, textColor: Color) {
+private fun LyricsView(
+    currentItem: PlaybackItem?,
+    modifier: Modifier = Modifier,
+    textColor: Color
+) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (currentItem?.description.isNullOrBlank()) {
             Text(
@@ -684,7 +682,10 @@ private fun LyricsView(currentItem: PlaybackItem?, modifier: Modifier = Modifier
                 text = currentItem.description,
                 style = MaterialTheme.typography.bodyLarge,
                 color = textColor,
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             )
         }
     }
@@ -713,7 +714,9 @@ private fun QueueSheetContent(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .navigationBarsPadding()) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.surface,
@@ -721,17 +724,23 @@ private fun QueueSheetContent(
         ) {
             Column {
                 Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Surface(
-                        modifier = Modifier.width(32.dp).height(4.dp),
+                        modifier = Modifier
+                            .width(32.dp)
+                            .height(4.dp),
                         shape = RoundedCornerShape(2.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                     ) {}
                 }
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -787,7 +796,9 @@ private fun QueueSheetContent(
         ) { isEmpty ->
             if (isEmpty) {
                 Box(
-                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -885,10 +896,15 @@ private fun QueueItemRow(
         shape = RoundedCornerShape(12.dp),
         color = containerColor,
         shadowElevation = elevation,
-        border = if (isCurrentlyPlaying) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null
+        border = if (isCurrentlyPlaying) BorderStroke(
+            2.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+        ) else null
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -925,7 +941,9 @@ private fun QueueItemRow(
                     .crossfade(true)
                     .build(),
                 contentDescription = null,
-                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop
             )
 
@@ -945,7 +963,9 @@ private fun QueueItemRow(
                 Text(
                     text = item.artistText,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (isCurrentlyPlaying) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isCurrentlyPlaying) MaterialTheme.colorScheme.onPrimaryContainer.copy(
+                        alpha = 0.8f
+                    ) else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

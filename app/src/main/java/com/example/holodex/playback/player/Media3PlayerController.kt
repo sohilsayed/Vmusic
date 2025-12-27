@@ -170,6 +170,9 @@ class Media3PlayerController(
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         val newIndex = exoPlayer.currentMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: -1
+
+        updatePreloadIndex(newIndex)
+
         controllerScope.launch { _mediaItemTransitionEventFlow.emit(PlayerMediaItemTransition(mediaItem, newIndex, reason)) }
     }
 

@@ -14,8 +14,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
-// We can map the Controller's State to the UI State the Views expect
-// ensuring we don't break the UI layer code.
 data class PlaybackUiState(
     val currentItem: PlaybackItem? = null,
     val isPlaying: Boolean = false,
@@ -64,22 +62,29 @@ class PlaybackViewModel @Inject constructor(
     fun seekTo(positionSec: Long) = controller.seekTo(positionSec * 1000L)
     fun skipToNext() = controller.skipToNext()
     fun skipToPrevious() = controller.skipToPrevious()
+
+    // FIX: Add Toggle Repeat Logic
     fun toggleRepeatMode() {
-        // Controller logic for repeat toggle could be added or handled here
-        // For now, standard ExoPlayer rotation:
-        // controller.toggleRepeatMode() // You might need to add this to Controller if not present
+        // Simple toggle: OFF -> ONE -> ALL -> OFF
+        val current = controller.exoPlayer.repeatMode
+        val next = when (current) {
+            androidx.media3.common.Player.REPEAT_MODE_OFF -> androidx.media3.common.Player.REPEAT_MODE_ONE
+            androidx.media3.common.Player.REPEAT_MODE_ONE -> androidx.media3.common.Player.REPEAT_MODE_ALL
+            else -> androidx.media3.common.Player.REPEAT_MODE_OFF
+        }
+        controller.exoPlayer.repeatMode = next
     }
+
     fun toggleShuffleMode() = controller.toggleShuffle()
 
     fun playQueueItemAtIndex(index: Int) = controller.exoPlayer.seekToDefaultPosition(index)
-    fun removeItemFromQueue(index: Int) = controller.exoPlayer.removeMediaItem(index)
-    fun reorderQueueItem(from: Int, to: Int) = controller.exoPlayer.moveMediaItem(from, to)
-    fun clearCurrentQueue() {
-        controller.exoPlayer.clearMediaItems()
-        controller.exoPlayer.stop()
-    }
 
-    // Stub for old scrubbing logic (PlayerController handles seek efficiently now)
+    // FIX: Call Controller methods to ensure persistence/state sync
+    fun removeItemFromQueue(index: Int) = controller.removeItem(index)
+    fun reorderQueueItem(from: Int, to: Int) = controller.moveItem(from, to)
+    fun clearCurrentQueue() = controller.clearQueue()
+
+    // Stub for old scrubbing logic
     fun setScrubbing(isScrubbing: Boolean) {}
 
     fun getAudioSessionId(): Int? = controller.exoPlayer.audioSessionId

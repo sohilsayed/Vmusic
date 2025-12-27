@@ -76,36 +76,59 @@ fun getHighResArtworkUrl(
     }.ifEmpty { originalUrl }
 }
 /**
- * Generates a prioritized, context-aware list of artwork URLs for a given PlaybackItem.
- * Coil will attempt to load from this list in order, using the first one that succeeds.
- *
- * @param item The PlaybackItem to get artwork for.
- * @param quality The desired quality for the *fallback* YouTube thumbnail. This is key
- * for requesting a high-res image for the player and a medium-res one for list items.
- * @return A list of URL strings in order of priority.
+ * INTELLIGENT ARTWORK GENERATOR
+ * Ensures High Quality is used when requested, overriding lower quality DB defaults.
  */
 fun generateArtworkUrlList(item: PlaybackItem?, quality: ThumbnailQuality): List<String> {
     if (item == null) return emptyList()
 
     val urls = mutableListOf<String>()
 
-    // PRIORITY 1: The song's specific artwork URI from mzstatic.
-    // We will use getHighResArtworkUrl to ensure we get a decently sized version.
-    if (!item.artworkUri.isNullOrBlank() && item.artworkUri.contains("mzstatic.com")) {
-        // For song-specific art, we usually want a high quality version regardless of context.
-        // We can use the existing utility for this.
-        val highResSongArt = getHighResArtworkUrl(item.artworkUri, AppPreferenceConstants.IMAGE_QUALITY_AUTO)
-        if(highResSongArt != null) {
-            urls.add(highResSongArt)
+    // Check if the item provided a specific URL (from DB)
+    val providedUrl = item.artworkUri
+
+    // Logic: Is the provided URL a "Low Quality" YouTube thumb?
+    // mqdefault = Medium, default = Low.
+    val isLowResYouTube = providedUrl != null && (providedUrl.contains("mqdefault.jpg") || providedUrl.contains("default.jpg"))
+
+    // 1. If we want MAX quality AND the provided URL is low-res YouTube, SKIP IT.
+    // We want to force the generator to pick the HD version.
+    if (quality == ThumbnailQuality.MAX && isLowResYouTube) {
+        // Do nothing, skip adding providedUrl
+    }
+    // 2. Otherwise (it's iTunes, Holodex, or we want low res anyway), add it.
+    else if (!providedUrl.isNullOrBlank()) {
+        // If it's iTunes, upgrade it if needed
+        val processedUrl = if (providedUrl.contains("mzstatic.com")) {
+            getHighResArtworkUrl(providedUrl, AppPreferenceConstants.IMAGE_QUALITY_AUTO)
+        } else {
+            providedUrl
         }
+        if (processedUrl != null) urls.add(processedUrl)
     }
 
-    // PRIORITY 2 (FALLBACK): YouTube thumbnails for the parent video, at the requested quality.
+    // 3. Append the YouTube candidates for the requested quality
+    // If quality is MAX, this adds maxresdefault.jpg at the correct position
     urls.addAll(getYouTubeThumbnailUrl(item.videoId, quality))
 
-    // As a final fallback, you could add the channel photo, but for now, we'll stick to
-    // the user's request: song art -> video thumbnail.
-    // if (!item.artworkUri.isNullOrBlank()) { urls.add(item.artworkUri) } // Fallback to channel photo if it was passed
-
     return urls.distinct()
+}
+/**
+ * Instantly guesses the aspect ratio based on the URL domain.
+ * This saves us from waiting for the image to load to determine layout.
+ */
+fun guessAspectRatioFromUrl(url: String?): Float {
+    if (url.isNullOrBlank()) return 16f / 9f // Default to video style
+
+    return when {
+        // iTunes/Apple Music artwork is ALWAYS square
+        url.contains("mzstatic.com") -> 1f
+        // YouTube thumbnails are standard 16:9
+        url.contains("ytimg.com") -> 16f / 9f
+        url.contains("youtube.com") -> 16f / 9f
+        // Holodex channel avatars are usually square
+        url.contains("channelImg") -> 1f
+        // Default fallback
+        else -> 16f / 9f
+    }
 }

@@ -18,7 +18,6 @@ import com.example.holodex.MyApp
 import com.example.holodex.background.SyncWorker
 import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.data.ThemePreference
-import com.example.holodex.data.download.LegacyDownloadScanner
 import com.example.holodex.data.repository.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
@@ -75,7 +74,6 @@ class SettingsViewModel @Inject constructor(
     private val sharedPreferences: SharedPreferences,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val workManager: WorkManager,
-    private val legacyDownloadScanner: LegacyDownloadScanner
 ) : ContainerHost<SettingsState, SettingsSideEffect>, ViewModel() {
 
     override val container: Container<SettingsState, SettingsSideEffect> = container(SettingsState())
@@ -121,10 +119,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // --- Actions ---
-    fun enqueueWork(request: androidx.work.WorkRequest) {
-        workManager.enqueue(request)
-    }
     fun saveApiKey(key: String) = intent {
         val trimmedKey = key.trim()
         if (trimmedKey.isBlank()) {
@@ -146,18 +140,6 @@ class SettingsViewModel @Inject constructor(
         reduce { state.copy(apiKeySaveResult = ApiKeySaveResult.Idle) }
     }
 
-    fun runLegacyFileScan() = intent {
-        if (state.scanStatus is ScanStatus.Scanning) return@intent
-        reduce { state.copy(scanStatus = ScanStatus.Scanning) }
-
-        runCatching {
-            legacyDownloadScanner.scanAndImportLegacyDownloads()
-        }.onSuccess { count ->
-            reduce { state.copy(scanStatus = ScanStatus.Complete(count)) }
-        }.onFailure { e ->
-            reduce { state.copy(scanStatus = ScanStatus.Error("Scan failed: ${e.localizedMessage}")) }
-        }
-    }
 
     fun resetScanStatus() = intent {
         reduce { state.copy(scanStatus = ScanStatus.Idle) }

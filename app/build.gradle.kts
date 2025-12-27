@@ -19,7 +19,7 @@ plugins {
     alias(libs.plugins.hilt)
     kotlin("kapt")
     id("org.jetbrains.kotlin.plugin.serialization")
-    id("androidx.room") version "2.7.2"
+    id("androidx.room") version "2.6.1"
 }
 
 room {
@@ -39,8 +39,8 @@ android {
         val discordClientId = localProperties.getProperty("DISCORD_CLIENT_ID") ?: ""
         val discordRedirectUri = localProperties.getProperty("DISCORD_REDIRECT_URI") ?: ""
 
-        buildConfigField("String", "DISCORD_CLIENT_ID", "$discordClientId")
-        buildConfigField("String", "DISCORD_REDIRECT_URI", "$discordRedirectUri")
+        buildConfigField("String", "DISCORD_CLIENT_ID", discordClientId)
+        buildConfigField("String", "DISCORD_REDIRECT_URI", discordRedirectUri)
         manifestPlaceholders += mapOf(
             "appAuthRedirectScheme" to "holodexmusic"
         )
@@ -117,6 +117,7 @@ dependencies {
     implementation(libs.bundles.orbit)
     // Desugaring
     coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
+
     // Media3 (using bundle)
     implementation(libs.bundles.media3.all)
     implementation("com.google.android.material:material:1.12.0")

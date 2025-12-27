@@ -69,6 +69,9 @@ object AppModule {
             .crossfade(true) // Reduces visual jitter on load
             .allowHardware(true) // CRITICAL: Uses GPU for bitmaps, saving Main Thread CPU
             .respectCacheHeaders(false) // Aggressively cache images regardless of server headers
+            .interceptorDispatcher(Dispatchers.IO)
+            .fetcherDispatcher(Dispatchers.IO)
+            .transformationDispatcher(Dispatchers.IO)
             .build()
     }
 

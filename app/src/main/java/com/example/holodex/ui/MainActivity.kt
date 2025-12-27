@@ -1,34 +1,20 @@
 package com.example.holodex.ui
 
 import android.Manifest
-import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
-import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import androidx.navigation.compose.rememberNavController
-import com.example.holodex.R
-import com.example.holodex.playback.domain.model.PlaybackItem
-import com.example.holodex.service.ARG_PLAYBACK_ITEMS_LIST
-import com.example.holodex.service.ARG_SHOULD_SHUFFLE
-import com.example.holodex.service.ARG_START_INDEX
-import com.example.holodex.service.ARG_START_POSITION_SEC
-import com.example.holodex.service.CUSTOM_COMMAND_PREPARE_FROM_REQUEST
-import com.example.holodex.service.MediaPlaybackService
-import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.MoreExecutors
+import com.example.holodex.domain.action.GlobalMediaActionHandler
 import dagger.hilt.android.AndroidEntryPoint
 import timber.log.Timber
 import javax.inject.Inject
@@ -42,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     private var mediaController: MediaController? = null
     private lateinit var sessionToken: SessionToken
+    @Inject lateinit var globalMediaActionHandler: GlobalMediaActionHandler
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
@@ -53,9 +40,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        installSplashScreen()
-
-        sessionToken = SessionToken(this, ComponentName(this, MediaPlaybackService::class.java))
         checkAndRequestPermissions()
 
         setContent {
@@ -63,35 +47,34 @@ class MainActivity : ComponentActivity() {
             MainScreenScaffold(
                 navController = navController,
                 activity = this,
-                player = player // Pass it here
+                player = player,
+                actionHandler = globalMediaActionHandler // Pass it down
             )
         }
     }
 
     private fun checkAndRequestPermissions() {
         val permissionsToRequest = mutableListOf<String>()
+
+        // 1. Notification Permission (Android 13+) - CRITICAL for Media Controls
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+
+        // 2. Storage Permissions (Legacy)
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
         }
+
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         }
     }
+
 
     override fun onStart() {
         super.onStart()
@@ -103,42 +86,4 @@ class MainActivity : ComponentActivity() {
 
     }
 
-    internal fun sendPlaybackRequestToService(
-        items: List<PlaybackItem>,
-        startIndex: Int,
-        startPositionSec: Long,
-        shouldShuffle: Boolean = false
-    ) {
-        if (items.isEmpty()) return
-
-        val controller = mediaController ?: run {
-            Toast.makeText(
-                this,
-                getString(R.string.error_player_service_not_ready),
-                Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
-
-        val commandArgs = Bundle().apply {
-            putParcelableArrayList(ARG_PLAYBACK_ITEMS_LIST, ArrayList(items))
-            putInt(ARG_START_INDEX, startIndex)
-            putLong(ARG_START_POSITION_SEC, startPositionSec)
-            putBoolean(ARG_SHOULD_SHUFFLE, shouldShuffle)
-        }
-        val command = SessionCommand(CUSTOM_COMMAND_PREPARE_FROM_REQUEST, Bundle.EMPTY)
-        val resultFuture: ListenableFuture<SessionResult> =
-            controller.sendCustomCommand(command, commandArgs)
-
-        resultFuture.addListener({
-            try {
-                val result = resultFuture.get()
-                if (result.resultCode != SessionResult.RESULT_SUCCESS) {
-                    Timber.w("Custom playback command failed: ${result.resultCode}")
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "Error processing playback command result")
-            }
-        }, MoreExecutors.directExecutor())
-    }
 }

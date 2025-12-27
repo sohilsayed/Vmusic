@@ -3,13 +3,13 @@ package com.example.holodex.background
 import com.example.holodex.data.api.AuthenticatedMusicdexApiService
 import com.example.holodex.data.api.LikeRequest
 import com.example.holodex.data.db.UnifiedMetadataEntity
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.PlaylistRepository
 import com.example.holodex.data.repository.SyncRepository
 import javax.inject.Inject
 
 class LikesSynchronizer @Inject constructor(
     private val syncRepository: SyncRepository,
-    private val holodexRepository: HolodexRepository, // Needed for Orphan lookup (fetchVideoAndFindSong)
+    private val playlistRepository: PlaylistRepository, // Needed for Orphan lookup (fetchVideoAndFindSong)
     private val apiService: AuthenticatedMusicdexApiService,
     private val logger: SyncLogger
 ) : ISynchronizer {
@@ -40,7 +40,7 @@ class LikesSynchronizer @Inject constructor(
 
                     if (startTime != null) {
                         // Song Segment: Fetch remote data to find the real Server UUID
-                        val result = holodexRepository.fetchVideoAndFindSong(videoId, startTime)
+                        val result = playlistRepository.fetchVideoAndFindSong(videoId, startTime)
                         val song = result?.second
 
                         if (song?.id != null) {
@@ -130,12 +130,14 @@ class LikesSynchronizer @Inject constructor(
             if (newFromServer.isNotEmpty()) logger.info("  Found ${newFromServer.size} new likes from server.")
 
             for (remote in newFromServer) {
+
+                val localItemId = "${remote.video_id}_${remote.start}"
                 // Construct Metadata (We must have this to insert interaction)
                 val meta = UnifiedMetadataEntity(
-                    id = remote.video_id, // We use videoId (or composite) as the Metadata Key
+                    id = localItemId, // <--- FIX: WAS remote.video_id
                     title = remote.name,
                     artistName = remote.original_artist ?: "Unknown",
-                    type = "SEGMENT", // API likes are usually segments
+                    type = "SEGMENT",
                     specificArtUrl = remote.art,
                     uploaderAvatarUrl = remote.channel?.photo,
                     duration = (remote.end - remote.start).toLong(),
@@ -143,12 +145,11 @@ class LikesSynchronizer @Inject constructor(
                     description = null,
                     startSeconds = remote.start.toLong(),
                     endSeconds = remote.end.toLong(),
-                    parentVideoId = remote.video_id,
+                    parentVideoId = remote.video_id, // This links it to the parent correctly
                     lastUpdatedAt = System.currentTimeMillis()
                 )
 
                 // The Interaction ID must match how we generate IDs locally (composite)
-                val localItemId = "${remote.video_id}_${remote.start}"
 
                 syncRepository.insertRemoteItem(localItemId, TYPE, remote.id, meta)
                 logger.logItemAction(LogAction.DOWNSTREAM_INSERT_LOCAL, remote.name, null, remote.id)

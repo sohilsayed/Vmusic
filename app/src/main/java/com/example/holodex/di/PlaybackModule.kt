@@ -23,8 +23,9 @@ import androidx.media3.exoplayer.upstream.DefaultAllocator
 import com.example.holodex.data.AppPreferenceConstants
 import com.example.holodex.data.db.AppDatabase
 import com.example.holodex.data.db.UnifiedDao
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.PlaylistRepository
 import com.example.holodex.data.repository.UserPreferencesRepository
+import com.example.holodex.data.repository.VideoRepository
 import com.example.holodex.playback.data.mapper.MediaItemMapper
 import com.example.holodex.playback.data.model.PlaybackDao
 import com.example.holodex.playback.data.preload.PreloadConfiguration
@@ -251,19 +252,19 @@ object PlaybackModule {
 
     @Provides
     @Singleton
-    fun provideAutoplayItemProvider(holodexRepository: HolodexRepository): AutoplayItemProvider {
-        return AutoplayItemProvider(holodexRepository)
+    fun provideAutoplayItemProvider(videoRepository:VideoRepository): AutoplayItemProvider {
+        return AutoplayItemProvider(videoRepository)
     }
 
     @Provides
     @Singleton
     fun provideContinuationManager(
-        holodexRepository: HolodexRepository,
+        playlistRepository: PlaylistRepository,
         userPreferencesRepository: UserPreferencesRepository,
         autoplayItemProvider: AutoplayItemProvider
     ): ContinuationManager {
         return ContinuationManager(
-            holodexRepository,
+            playlistRepository,
             userPreferencesRepository,
             autoplayItemProvider
         )
@@ -283,11 +284,20 @@ object PlaybackModule {
         playbackDao: PlaybackDao,
         unifiedDao: UnifiedDao,
         mapper: MediaItemMapper,
+        continuationManager: ContinuationManager,
+        userPreferencesRepository: UserPreferencesRepository, // <--- ADD THIS
         @ApplicationScope scope: CoroutineScope,
-        continuationManager: ContinuationManager
+        mediaControllerManager: com.example.holodex.playback.player.MediaControllerManager
     ): PlaybackController {
         return PlaybackController(
-            exoPlayer, playbackDao, unifiedDao, mapper, continuationManager, scope
+            exoPlayer,
+            playbackDao,
+            unifiedDao,
+            mapper,
+            continuationManager,
+            userPreferencesRepository, // <--- Pass it in the correct order
+            scope,
+            mediaControllerManager
         )
     }
 

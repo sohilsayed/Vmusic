@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/ui/screens/LibraryScreen.kt
 package com.example.holodex.ui.screens
 
 import androidx.compose.animation.animateColorAsState
@@ -24,13 +23,10 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -40,10 +36,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,9 +49,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.example.holodex.R
+import com.example.holodex.domain.action.GlobalMediaActionHandler
 import com.example.holodex.ui.dialogs.AddExternalChannelDialog
 import com.example.holodex.ui.navigation.AppDestinations
 import com.example.holodex.viewmodel.AddChannelViewModel
+import com.example.holodex.viewmodel.LibraryType
 import com.example.holodex.viewmodel.PlaylistManagementViewModel
 import kotlinx.coroutines.launch
 
@@ -72,11 +68,12 @@ private enum class LibraryTab(val titleRes: Int) {
 fun LibraryScreen(
     navController: NavController,
     playlistManagementViewModel: PlaylistManagementViewModel,
-    contentPadding: PaddingValues // NEW PARAMETER
+    contentPadding: PaddingValues,
+    actionHandler: GlobalMediaActionHandler // Consolidated Handler
 ) {
+    // Default to 'Favorites' (index 1)
     val pagerState = rememberPagerState(initialPage = 1, pageCount = { LibraryTab.entries.size })
     val coroutineScope = rememberCoroutineScope()
-    var isGridView by remember { mutableStateOf(false) }
 
     val addChannelViewModel: AddChannelViewModel = hiltViewModel()
     val showAddChannelDialog by addChannelViewModel.showDialog.collectAsStateWithLifecycle()
@@ -87,15 +84,12 @@ fun LibraryScreen(
 
     Scaffold(
         topBar = {
-            LibraryTopAppBar(
-                isGridView = isGridView,
-                onViewToggle = { isGridView = !isGridView }
-            )
+            LibraryTopAppBar()
         },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { addChannelViewModel.openDialog() },
-                // Adjust FAB padding
+                // Adjust FAB padding to sit above the bottom navigation bar
                 modifier = Modifier.padding(bottom = contentPadding.calculateBottomPadding())
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add External Channel")
@@ -103,7 +97,7 @@ fun LibraryScreen(
         }
     ) { innerPadding ->
 
-        // Combine padding
+        // Combine TopAppBar padding with BottomNavBar padding
         val unifiedPadding = PaddingValues(
             top = innerPadding.calculateTopPadding(),
             bottom = contentPadding.calculateBottomPadding() + 16.dp
@@ -112,8 +106,9 @@ fun LibraryScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = unifiedPadding.calculateTopPadding()) // Only top here
+                .padding(top = unifiedPadding.calculateTopPadding())
         ) {
+            // Animated Tabs
             AnimatedCustomTabRow(
                 selectedTabIndex = pagerState.currentPage,
                 tabs = LibraryTab.entries.map { stringResource(it.titleRes) },
@@ -123,51 +118,53 @@ fun LibraryScreen(
                 }
             )
 
+            // Pager Content
             HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                // Calculate specific padding for lists inside the pager
+                val listPadding = PaddingValues(bottom = unifiedPadding.calculateBottomPadding())
+
                 when (LibraryTab.entries[page]) {
-                    LibraryTab.FAVORITES -> FavoritesTab(
-                        isGridView = isGridView,
-                        navController = navController,
-                        playlistManagementViewModel = playlistManagementViewModel,
-                        contentPadding = PaddingValues(bottom = unifiedPadding.calculateBottomPadding())
-                    )
+                    LibraryTab.FAVORITES -> {
+                        FavoritesScreen(
+                            actions = actionHandler,
+                            contentPadding = listPadding,
+                            isGridView = false
+                        )
+                    }
 
-                    LibraryTab.PLAYLISTS -> PlaylistsTab(
-                        onPlaylistClicked = { playlist ->
-                            val idToNavigate = when {
-                                playlist.playlistId < 0 && playlist.serverId == null -> playlist.playlistId.toString()
-                                playlist.playlistId > 0 -> playlist.playlistId.toString()
-                                else -> playlist.serverId
-                            }
-                            if (!idToNavigate.isNullOrBlank()) {
-                                navController.navigate(
-                                    AppDestinations.playlistDetailsRoute(
-                                        idToNavigate
-                                    )
-                                )
-                            }
-                        },
-                        contentPadding = PaddingValues(bottom = unifiedPadding.calculateBottomPadding())
-                    )
+                    LibraryTab.PLAYLISTS -> {
+                        PlaylistsTab(
+                            onPlaylistClicked = { playlist ->
+                                val idToNavigate = when {
+                                    playlist.playlistId < 0 && playlist.serverId == null -> playlist.playlistId.toString()
+                                    playlist.playlistId > 0 -> playlist.playlistId.toString()
+                                    else -> playlist.serverId
+                                }
+                                if (!idToNavigate.isNullOrBlank()) {
+                                    navController.navigate(AppDestinations.playlistDetailsRoute(idToNavigate))
+                                }
+                            },
+                            contentPadding = listPadding
+                        )
+                    }
 
-                    LibraryTab.HISTORY -> HistoryTab(
-                        navController = navController,
-                        playlistManagementViewModel = playlistManagementViewModel,
-                        contentPadding = PaddingValues(bottom = unifiedPadding.calculateBottomPadding())
-                    )
+                    LibraryTab.HISTORY -> {
+                        // Replaces old HistoryScreen
+                        StandardMediaListScreen(
+                            libraryType = LibraryType.HISTORY,
+                            actions = actionHandler,
+                            contentPadding = listPadding
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LibraryTopAppBar(
-    isGridView: Boolean,
-    onViewToggle: () -> Unit
-) {
+private fun LibraryTopAppBar() {
     TopAppBar(
         title = {
             Text(
@@ -175,14 +172,6 @@ private fun LibraryTopAppBar(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
-        },
-        actions = {
-            IconButton(onClick = onViewToggle) {
-                Icon(
-                    imageVector = if (isGridView) Icons.AutoMirrored.Filled.ViewList else Icons.Filled.GridView,
-                    contentDescription = stringResource(if (isGridView) R.string.action_view_as_list else R.string.action_view_as_grid)
-                )
-            }
         },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.surface,
@@ -209,6 +198,7 @@ private fun AnimatedCustomTabRow(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         val tabWidth = this@BoxWithConstraints.maxWidth / tabs.size
+        // Background Track
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -218,6 +208,7 @@ private fun AnimatedCustomTabRow(
                     shape = RoundedCornerShape(24.dp)
                 )
         )
+        // Sliding Indicator
         val targetOffset = tabWidth * selectedTabIndex
         val pagerOffset = tabWidth * pagerState.currentPageOffsetFraction
         val indicatorOffset = targetOffset + pagerOffset
@@ -234,6 +225,7 @@ private fun AnimatedCustomTabRow(
                 .padding(4.dp)
                 .background(color = indicatorColor, shape = RoundedCornerShape(20.dp))
         )
+        // Text Items
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             tabs.forEachIndexed { index, title ->
                 AnimatedTab(
@@ -285,44 +277,11 @@ private fun PlaylistsTab(
     onPlaylistClicked: (com.example.holodex.data.db.PlaylistEntity) -> Unit,
     contentPadding: PaddingValues
 ) {
+    // Reuses existing PlaylistsScreen logic
     PlaylistsScreen(
         modifier = Modifier.fillMaxSize(),
         playlistManagementViewModel = hiltViewModel(),
         onPlaylistClicked = onPlaylistClicked,
         contentPadding = contentPadding
-    )
-}
-
-@Composable
-private fun FavoritesTab(
-    isGridView: Boolean,
-    navController: NavController,
-    playlistManagementViewModel: PlaylistManagementViewModel,
-    contentPadding: PaddingValues
-) {
-    FavoritesScreen(
-        isGridView = isGridView,
-        modifier = Modifier.fillMaxSize(),
-        videoListViewModel = hiltViewModel(),
-        favoritesViewModel = hiltViewModel(),
-        playlistManagementViewModel = playlistManagementViewModel,
-        navController = navController,
-        contentPadding = contentPadding // PASS IT
-    )
-}
-
-@Composable
-private fun HistoryTab(
-    navController: NavController,
-    playlistManagementViewModel: PlaylistManagementViewModel,
-    contentPadding: PaddingValues
-) {
-    HistoryScreen(
-        modifier = Modifier.fillMaxSize(),
-        navController = navController,
-        videoListViewModel = hiltViewModel(),
-        favoritesViewModel = hiltViewModel(),
-        playlistManagementViewModel = playlistManagementViewModel,
-        contentPadding = contentPadding // PASS IT
     )
 }

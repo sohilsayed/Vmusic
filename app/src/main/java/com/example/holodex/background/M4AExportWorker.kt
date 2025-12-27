@@ -3,7 +3,6 @@ package com.example.holodex.background
 
 import android.content.ContentValues
 import android.content.Context
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -130,14 +129,8 @@ class M4AExportWorker @AssistedInject constructor(
             Timber.d("$TAG: MetadataWriter successfully wrote tags to temp file.")
 
 
-            // Step 3: Verify and export the now-tagged file
-            verifyMetadataInFile(
-                tempOutputFile,
-                songTitle,
-                artistName,
-                albumName,
-                artworkUri != null
-            )
+            // Step 3:  export the now-tagged file
+
             val finalUri = exportToMediaStore(tempOutputFile, finalFileName)
                 ?: throw IOException("Failed to export temp file to MediaStore.")
 
@@ -260,43 +253,4 @@ class M4AExportWorker @AssistedInject constructor(
         return null
     }
 
-    private fun verifyMetadataInFile(
-        file: File,
-        expectedTitle: String,
-        expectedArtist: String,
-        expectedAlbum: String,
-        shouldHaveArtwork: Boolean
-    ) {
-        var retriever: MediaMetadataRetriever? = null
-        try {
-            retriever = MediaMetadataRetriever()
-            retriever.setDataSource(file.absolutePath)
-            val foundTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-            val foundArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            val foundAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            val hasArtwork = retriever.embeddedPicture?.isNotEmpty() == true
-            val titleMatches = foundTitle == expectedTitle
-            val artistMatches = foundArtist == expectedArtist
-            val albumMatches = foundAlbum == expectedAlbum
-            val artworkMatches = if (shouldHaveArtwork) hasArtwork else true
-            if (titleMatches && artistMatches && albumMatches && artworkMatches) {
-                Timber.i("Metadata Verification PASSED - All expected metadata found correctly.")
-            } else {
-                Timber.w("--- Metadata Verification FAILED ---")
-                if (!titleMatches) Timber.w("--> Title Mismatch: Expected '$expectedTitle', Found '$foundTitle'")
-                if (!artistMatches) Timber.w("--> Artist Mismatch: Expected '$expectedArtist', Found '$foundArtist'")
-                if (!albumMatches) Timber.w("--> Album Mismatch: Expected '$expectedAlbum', Found '$foundAlbum'")
-                if (!artworkMatches) Timber.w("--> Artwork Mismatch: Expected artwork to be present, but it was not.")
-                Timber.w("------------------------------------")
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Metadata verification failed due to an exception.")
-        } finally {
-            try {
-                retriever?.release()
-            } catch (e: Exception) {
-                Timber.w(e, "Failed to release MediaMetadataRetriever")
-            }
-        }
-    }
 }

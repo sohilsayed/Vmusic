@@ -5,19 +5,13 @@ import androidx.core.content.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
-import com.example.holodex.data.cache.BrowseCacheKey
-import com.example.holodex.data.cache.SearchCacheKey
 import com.example.holodex.data.model.HolodexVideoItem
-import com.example.holodex.data.repository.DownloadRepository
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.ConfigRepository
+import com.example.holodex.data.repository.FeedRepository
 import com.example.holodex.data.repository.SearchHistoryRepository
 import com.example.holodex.data.repository.UnifiedVideoRepository
-import com.example.holodex.playback.domain.model.PlaybackItem
-import com.example.holodex.playback.domain.usecase.AddOrFetchAndAddUseCase
-import com.example.holodex.playback.player.PlaybackController
 import com.example.holodex.util.extractVideoIdFromQuery
 import com.example.holodex.viewmodel.autoplay.ContinuationManager
-import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
 import com.example.holodex.viewmodel.state.BrowseFilterState
 import com.example.holodex.viewmodel.state.ViewTypePreset
 import com.google.gson.Gson
@@ -25,13 +19,16 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import org.mobilenativefoundation.store.store5.StoreReadResponse
 import org.orbitmvi.orbit.ContainerHost
 import org.orbitmvi.orbit.viewmodel.container
+import timber.log.Timber
 import javax.inject.Inject
 
-// State & SideEffect remain unchanged...
+// State & SideEffect Definitions
 data class VideoListState(
     val browseItems: ImmutableList<UnifiedDisplayItem> = persistentListOf(),
     val browseIsLoadingInitial: Boolean = false,
@@ -49,7 +46,6 @@ data class VideoListState(
     val activeContextType: MusicCategoryType = MusicCategoryType.LATEST,
     val isSearchActive: Boolean = false,
     val currentSearchQuery: String = "",
-    val activeSearchSource: String = "Holodex",
     val browseFilterState: BrowseFilterState,
     val selectedOrganization: String = "Nijisanji",
     val availableOrganizations: List<Pair<String, String?>> = emptyList(),
@@ -58,20 +54,18 @@ data class VideoListState(
 
 sealed class VideoListSideEffect {
     data class ShowToast(val message: String) : VideoListSideEffect()
-    data class NavigateTo(val destination: VideoListViewModel.NavigationDestination) :
-        VideoListSideEffect()
+    data class NavigateTo(val destination: VideoListViewModel.NavigationDestination) : VideoListSideEffect()
 }
 
-@UnstableApi
+@androidx.annotation.OptIn(UnstableApi::class)
 @HiltViewModel
 class VideoListViewModel @Inject constructor(
-    private val holodexRepository: HolodexRepository,
+    private val configRepository: ConfigRepository,
+    private val feedRepository: FeedRepository,       // NEW: Store5 Feed
     private val unifiedRepository: UnifiedVideoRepository,
     private val sharedPreferences: SharedPreferences,
     private val searchHistoryRepository: SearchHistoryRepository,
-    private val continuationManager: ContinuationManager,
-    private val playbackController: PlaybackController,
-    private val addOrFetchAndAddUseCase: AddOrFetchAndAddUseCase
+    private val continuationManager: ContinuationManager
 ) : ContainerHost<VideoListState, VideoListSideEffect>, ViewModel() {
 
     companion object {
@@ -89,6 +83,7 @@ class VideoListViewModel @Inject constructor(
         object HomeScreenWithSearch : NavigationDestination()
     }
 
+    // Legacy compatibility field
     var videoItemForDetailScreen: HolodexVideoItem? = null
         private set
 
@@ -97,13 +92,12 @@ class VideoListViewModel @Inject constructor(
             browseFilterState = loadLastBrowseFilters(),
             currentSearchQuery = loadLastSearchQuery(),
             activeContextType = loadLastActiveListContextType(),
-            selectedOrganization = sharedPreferences.getString(PREF_LAST_SELECTED_ORG, "Nijisanji")
-                ?: "Nijisanji"
+            selectedOrganization = sharedPreferences.getString(PREF_LAST_SELECTED_ORG, "Nijisanji") ?: "Nijisanji"
         )
     ) {
         intent {
             viewModelScope.launch {
-                holodexRepository.availableOrganizations.collect { orgs ->
+                configRepository.availableOrganizations.collect { orgs ->
                     intent { reduce { state.copy(availableOrganizations = orgs) } }
                 }
             }
@@ -131,9 +125,12 @@ class VideoListViewModel @Inject constructor(
         }
     }
 
+    // --- NEW BROWSE LOGIC (Store5) ---
     private fun fetchBrowseItemsInternal(isInitial: Boolean, isRefresh: Boolean) = intent {
+        // 1. Guard check
         if (!isRefresh && !isInitial && (state.browseIsLoadingMore || state.browseEndOfList)) return@intent
 
+        // 2. Set Loading State
         reduce {
             state.copy(
                 browseIsLoadingInitial = isInitial,
@@ -145,55 +142,73 @@ class VideoListViewModel @Inject constructor(
         val offset = if (isInitial || isRefresh) 0 else state.browseCurrentOffset
         val filters = state.browseFilterState
 
-        val result: Result<List<HolodexVideoItem>> = runCatching {
-            if (filters.selectedOrganization == "Favorites") {
-                val favChannels = unifiedRepository.getFavoriteChannels().first()
-                if (favChannels.isEmpty()) return@runCatching emptyList<HolodexVideoItem>()
+        // 3. Collect from Store5
+        feedRepository.getFeed(
+            filter = filters,
+            offset = offset,
+            refresh = isRefresh
+        ).onEach { response ->
+            Timber.d("ViewModel: Received Store Response: ${response::class.java.simpleName}")
 
-                val holodexResults = holodexRepository.getFavoritesFeed(favChannels, filters, offset).getOrNull()?.data ?: emptyList()
-                holodexResults
-            } else {
-                val key = BrowseCacheKey(filters, offset)
-                holodexRepository.fetchBrowseList(key, isRefresh).getOrThrow().data
+            when (response) {
+                is StoreReadResponse.Data -> {
+                    // FIX: Handle null value from Store5 SOT
+                    val newItems = response.value ?: emptyList()
+                    Timber.d("ViewModel: Data contains ${newItems.size} items")
+
+                    reduce {
+                        val currentList = if (isInitial || isRefresh) emptyList() else state.browseItems
+
+
+                        // Dedup logic: Avoid duplicates if pagination overlaps
+                        val newItemsUnique = if (isInitial || isRefresh) newItems
+                        else newItems.filter { newItem -> currentList.none { it.videoId == newItem.videoId } }
+
+                        state.copy(
+                            browseItems = (currentList + newItemsUnique).toImmutableList(),
+                            browseCurrentOffset = offset + newItems.size,
+                            browseEndOfList = newItems.size < PAGE_SIZE,
+                            browseIsLoadingInitial = false,
+                            browseIsLoadingMore = false,
+                            browseIsRefreshing = false
+                        )
+                    }
+
+                    // Update Autoplay Context so the player knows what to play next
+                    if (newItems.isNotEmpty() && state.activeContextType != MusicCategoryType.SEARCH) {
+                        continuationManager.setAutoplayContext(newItems)
+                    }
+                }
+                is StoreReadResponse.Error -> {
+                    Timber.e(response.errorMessageOrNull(), "ViewModel: Received Error")
+                    reduce {
+                        state.copy(
+                            browseIsLoadingInitial = false,
+                            browseIsLoadingMore = false,
+                            browseIsRefreshing = false
+                        )
+                    }
+                    postSideEffect(VideoListSideEffect.ShowToast(response.errorMessageOrNull() ?: "Error loading content"))
+                }
+                is StoreReadResponse.Loading -> {
+                    Timber.d("ViewModel: Loading from ${response.origin}")
+                }
+                is StoreReadResponse.NoNewData -> {
+                    Timber.d("ViewModel: NoNewData")
+                    reduce {
+                        state.copy(
+                            browseIsLoadingInitial = false,
+                            browseIsLoadingMore = false,
+                            browseIsRefreshing = false
+                        )
+                    }
+                }
+                else -> Timber.d("ViewModel: Unhandled State")
             }
-        }
-
-        val likedIds = unifiedRepository.observeLikedItemIds().first()
-        val downloadedIds = try { unifiedRepository.getDownloadedIdsSnapshot() } catch (e: Exception) { emptySet() }
-
-        result.onSuccess { rawItems ->
-            val unifiedItems =
-                rawItems.map { it.toUnifiedDisplayItem(likedIds.contains(it.id), downloadedIds) }
-            reduce {
-                val currentList = if (isInitial || isRefresh) emptyList() else state.browseItems
-                val newItemsUnique =
-                    if (isInitial || isRefresh) unifiedItems else unifiedItems.filter { newItem -> currentList.none { it.videoId == newItem.videoId } }
-
-                state.copy(
-                    browseItems = (currentList + newItemsUnique).toImmutableList(),
-                    browseCurrentOffset = offset + rawItems.size,
-                    browseEndOfList = rawItems.isEmpty() || rawItems.size < PAGE_SIZE,
-                    browseIsLoadingInitial = false,
-                    browseIsLoadingMore = false,
-                    browseIsRefreshing = false
-                )
-            }
-
-            if (unifiedItems.isNotEmpty() && state.activeContextType != MusicCategoryType.SEARCH) {
-                continuationManager.setAutoplayContext(unifiedItems)
-            }
-        }.onFailure {
-            postSideEffect(VideoListSideEffect.ShowToast("Failed to load content"))
-            reduce {
-                state.copy(
-                    browseIsLoadingInitial = false,
-                    browseIsLoadingMore = false,
-                    browseIsRefreshing = false
-                )
-            }
-        }
+        }.launchIn(viewModelScope)
     }
 
+    // --- NEW SEARCH LOGIC (Store5) ---
     private fun fetchSearchResultsInternal(isInitial: Boolean, isRefresh: Boolean) = intent {
         val query = state.currentSearchQuery
         if (query.isBlank()) return@intent
@@ -209,38 +224,33 @@ class VideoListViewModel @Inject constructor(
 
         val offset = if (isInitial || isRefresh) 0 else state.searchCurrentOffset
 
-        val result = runCatching {
-            if (state.activeSearchSource == "My Channels") {
-                val channelIds = unifiedRepository.getFavoriteChannelIds().first()
-                if (channelIds.isEmpty()) emptyList()
-                else holodexRepository.searchMusicOnChannels(query, channelIds).getOrThrow()
-            } else {
-                val key = SearchCacheKey(query, offset)
-                holodexRepository.fetchSearchList(key, isRefresh).getOrThrow().data
+        // Holodex Search via FeedRepository
+        feedRepository.getFeed(
+            filter = state.browseFilterState, // Filters apply to search too
+            searchQuery = query,
+            offset = offset,
+            refresh = isRefresh
+        ).onEach { response ->
+            when(response) {
+                is StoreReadResponse.Data -> {
+                    val newItems = response.value ?: emptyList()
+                    reduce {
+                        val currentList = if (isInitial || isRefresh) emptyList() else state.searchItems
+                        state.copy(
+                            searchItems = (currentList + newItems).toImmutableList(),
+                            searchCurrentOffset = offset + newItems.size,
+                            searchEndOfList = newItems.isEmpty(),
+                            searchIsLoadingInitial = false, searchIsLoadingMore = false
+                        )
+                    }
+                }
+                is StoreReadResponse.Error -> {
+                    reduce { state.copy(searchIsLoadingInitial = false, searchIsLoadingMore = false) }
+                    postSideEffect(VideoListSideEffect.ShowToast("Search failed"))
+                }
+                else -> {}
             }
-        }
-
-        // *** FIX 2: Use Unified Repo for Downloads ***
-        val likedIds = unifiedRepository.observeLikedItemIds().first()
-        val downloadedIds =
-            unifiedRepository.getDownloads().first().map { it.playbackItemId }.toSet()
-
-        result.onSuccess { rawItems ->
-            val unifiedItems =
-                rawItems.map { it.toUnifiedDisplayItem(likedIds.contains(it.id), downloadedIds) }
-            reduce {
-                val currentList = if (isInitial || isRefresh) emptyList() else state.searchItems
-                state.copy(
-                    searchItems = (currentList + unifiedItems).toImmutableList(),
-                    searchCurrentOffset = offset + rawItems.size,
-                    searchEndOfList = rawItems.isEmpty(),
-                    searchIsLoadingInitial = false, searchIsLoadingMore = false
-                )
-            }
-        }.onFailure {
-            postSideEffect(VideoListSideEffect.ShowToast("Search failed"))
-            reduce { state.copy(searchIsLoadingInitial = false, searchIsLoadingMore = false) }
-        }
+        }.launchIn(viewModelScope)
     }
 
     // --- PUBLIC ACTIONS ---
@@ -250,15 +260,12 @@ class VideoListViewModel @Inject constructor(
     }
 
     fun loadMore(contextType: MusicCategoryType) = intent {
-        if (contextType == MusicCategoryType.SEARCH) fetchSearchResultsInternal(
-            isInitial = false,
-            isRefresh = false
-        )
+        if (contextType == MusicCategoryType.SEARCH) fetchSearchResultsInternal(isInitial = false, isRefresh = false)
         else fetchBrowseItemsInternal(isInitial = false, isRefresh = false)
     }
 
     fun onVideoClicked(item: UnifiedDisplayItem) = intent {
-        videoItemForDetailScreen = null
+        videoItemForDetailScreen = null // Clear legacy
         postSideEffect(VideoListSideEffect.NavigateTo(NavigationDestination.VideoDetails(item.videoId)))
     }
 
@@ -363,30 +370,7 @@ class VideoListViewModel @Inject constructor(
         }
     }
 
-    fun setActiveSearchSource(source: String) = intent {
-        reduce { state.copy(activeSearchSource = source) }
-    }
-
-    fun addVideoOrItsSegmentsToQueue(item: PlaybackItem) = intent {
-        viewModelScope.launch {
-            addOrFetchAndAddUseCase(item)
-                .onSuccess { postSideEffect(VideoListSideEffect.ShowToast(it)) }
-                .onFailure { postSideEffect(VideoListSideEffect.ShowToast("Failed: ${it.message}")) }
-        }
-    }
-
-    fun playFavoriteOrLikedSegmentItem(item: PlaybackItem) = intent {
-        // We need to construct the list to play.
-        // Ideally, we play the list surrounding this item, but for a single item click:
-        val itemsToPlay = listOf(item)
-        val startIndex = 0
-
-        // Just call it directly. No launch needed.
-        playbackController.loadAndPlay(itemsToPlay, startIndex)
-    }
-
-    fun clearNavigationRequest() { /* Handled by side effects */
-    }
+    // --- Helpers ---
 
     private fun loadLastBrowseFilters(): BrowseFilterState = try {
         Gson().fromJson(sharedPreferences.getString(PREF_LAST_BROWSE_FILTERS, null), BrowseFilterState::class.java)
@@ -409,16 +393,10 @@ class VideoListViewModel @Inject constructor(
 
     private fun loadLastActiveListContextType(): MusicCategoryType = try {
         MusicCategoryType.valueOf(
-            sharedPreferences.getString(
-                PREF_LAST_CATEGORY_TYPE,
-                MusicCategoryType.LATEST.name
-            )!!
+            sharedPreferences.getString(PREF_LAST_CATEGORY_TYPE, MusicCategoryType.LATEST.name)!!
         )
-    } catch (_: Exception) {
-        MusicCategoryType.LATEST
-    }
+    } catch (_: Exception) { MusicCategoryType.LATEST }
 
     private fun saveActiveListContextType(type: MusicCategoryType) =
         sharedPreferences.edit { putString(PREF_LAST_CATEGORY_TYPE, type.name) }
-
 }

@@ -1,3 +1,4 @@
+// File: java/com/example/holodex/data/repository/DownloadRepository.kt
 package com.example.holodex.data.repository
 
 import android.content.Context
@@ -22,6 +23,7 @@ import com.example.holodex.data.db.DownloadStatus
 import com.example.holodex.data.db.UnifiedDao
 import com.example.holodex.data.db.UnifiedMetadataEntity
 import com.example.holodex.data.db.UserInteractionEntity
+import com.example.holodex.data.model.HolodexChannelMin
 import com.example.holodex.data.model.HolodexSong
 import com.example.holodex.data.model.HolodexVideoItem
 import com.example.holodex.di.ApplicationScope
@@ -57,6 +59,7 @@ interface DownloadRepository {
     suspend fun deleteDownloadById(itemId: String)
     suspend fun resumeDownload(itemId: String)
     suspend fun retryExport(itemId: String)
+    suspend fun retryDownload(itemId: String) // New Method
     suspend fun reconcileAllDownloads()
     suspend fun rescanStorageForDownloads()
     val downloadCompletedEvents: SharedFlow<DownloadCompletedEvent>
@@ -94,6 +97,7 @@ class DownloadRepositoryImpl @Inject constructor(
         val durationSec = (song.end - song.start).toLong()
 
         val existing = unifiedDao.getDownloadInteraction(itemId)
+        // Allow restarting if FAILED
         if (existing?.downloadStatus in listOf(DownloadStatus.ENQUEUED.name, DownloadStatus.DOWNLOADING.name, DownloadStatus.COMPLETED.name, DownloadStatus.PROCESSING.name)) {
             Timber.w("$TAG: Download for $itemId is already active/done. Skipping.")
             return
@@ -104,7 +108,7 @@ class DownloadRepositoryImpl @Inject constructor(
         applicationScope.launch(Dispatchers.IO) {
             var downloadHelper: DownloadHelper? = null
             try {
-                // 1. Upsert Metadata & Interaction State (Existing code)
+                // 1. Upsert Metadata & Interaction State
                 val metadata = UnifiedMetadataEntity(
                     id = itemId, title = displayTitle, artistName = video.channel.name, type = "SEGMENT",
                     specificArtUrl = song.artUrl, uploaderAvatarUrl = video.channel.photoUrl, duration = durationSec,
@@ -121,16 +125,12 @@ class DownloadRepositoryImpl @Inject constructor(
                 )
                 unifiedDao.upsertInteraction(interaction)
 
-                // 2. Resolve Stream URL (Existing code)
+                // 2. Resolve Stream URL
                 val streamUrl = streamResolutionCoordinator.getCachedUrl(video.id) ?: withTimeout(30_000) {
-                    // Pass true here to force M4A selection
                     youtubeStreamRepository.getAudioStreamDetails(video.id, preferM4a = true).getOrThrow().streamUrl
                 }
 
-
-
-
-                // 4. Create MediaItem WITH ClippingConfiguration (*** THE FIX ***)
+                // 3. Create MediaItem
                 val mediaItem = MediaItem.fromUri(streamUrl)
 
                 val cacheDataSourceFactory = CacheDataSource.Factory()
@@ -141,40 +141,29 @@ class DownloadRepositoryImpl @Inject constructor(
                 val downloadHelperFactory = DownloadHelper.Factory().setDataSourceFactory(cacheDataSourceFactory)
                 downloadHelper = downloadHelperFactory.create(mediaItem)
 
-
-                // 6. Prepare and Get Request
+                // 5. Prepare and Get Request
                 val request = suspendCancellableCoroutine<DownloadRequest> { continuation ->
                     downloadHelper.prepare(object : DownloadHelper.Callback {
-                        override fun onPrepared(
-                            helper: DownloadHelper,
-                            tracksInfoAvailable: Boolean
-                        ) {
+                        override fun onPrepared(helper: DownloadHelper, tracksInfoAvailable: Boolean) {
                             try {
-                                // Calculate milliseconds
                                 val startMs = song.start * 1000L
                                 val durationMs = (song.end - song.start) * 1000L
-
-                                // Use the overload explicitly designed for progressive streams.
-                                // This forces the helper to calculate the byte range for this time window.
                                 val req = helper.getDownloadRequest(
-                                    itemId,                                     // id
-                                    displayTitle.toByteArray(StandardCharsets.UTF_8), // data
-                                    startMs,                                    // startPositionMs
-                                    durationMs                                  // durationMs
+                                    itemId,
+                                    displayTitle.toByteArray(StandardCharsets.UTF_8),
+                                    startMs,
+                                    durationMs
                                 )
                                 continuation.resume(req)
                             } catch (e: Exception) {
                                 continuation.resumeWithException(e)
                             }
                         }
-
                         override fun onPrepareError(helper: DownloadHelper, e: IOException) {
                             continuation.resumeWithException(e)
                         }
                     })
-                    continuation.invokeOnCancellation {
-                        downloadHelper.release()
-                    }
+                    continuation.invokeOnCancellation { downloadHelper.release() }
                 }
 
                 // 6. Dispatch to Service
@@ -190,7 +179,44 @@ class DownloadRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun retryDownload(itemId: String) {
+        val metaProjection = unifiedDao.getItemByIdOneShot(itemId) ?: return
+        val meta = metaProjection.metadata
+
+        Timber.i("$TAG: Retrying download for $itemId")
+
+        // Reconstruct objects from DB metadata to reuse startDownload logic
+        val channel = HolodexChannelMin(
+            id = meta.channelId,
+            name = meta.artistName,
+            englishName = null, org = null, type = "vtuber", photoUrl = meta.uploaderAvatarUrl
+        )
+
+        val videoShell = HolodexVideoItem(
+            id = meta.parentVideoId ?: meta.id,
+            title = meta.title, // Note: Metadata title is song title, but for ID resolution parent ID matters most
+            type = "stream", topicId = null, availableAt = "", publishedAt = null, duration = 0, status = "past",
+            channel = channel, songcount = 0, description = null, songs = null
+        )
+
+        val songShell = HolodexSong(
+            name = meta.title,
+            start = meta.startSeconds?.toInt() ?: 0,
+            end = meta.endSeconds?.toInt() ?: meta.duration.toInt(),
+            itunesId = null,
+            artUrl = meta.specificArtUrl,
+            originalArtist = null,
+            videoId = meta.parentVideoId ?: meta.id
+        )
+
+        // Reset status so startDownload accepts it
+        unifiedDao.updateDownloadStatus(itemId, DownloadStatus.NOT_DOWNLOADED.name)
+
+        startDownload(videoShell, songShell)
+    }
+
     override suspend fun retryExport(itemId: String) {
+        // ... (Existing implementation) ...
         val projection = unifiedDao.getItemByIdOneShot(itemId) ?: return
         val downloadInt = projection.interactions.find { it.interactionType == "DOWNLOAD" } ?: return
         if (downloadInt.downloadStatus != DownloadStatus.EXPORT_FAILED.name) return
@@ -202,7 +228,9 @@ class DownloadRepositoryImpl @Inject constructor(
             .putString(M4AExportWorker.KEY_ORIGINAL_URI, "cache://$itemId")
             .putString(M4AExportWorker.KEY_SONG_TITLE, projection.metadata.title)
             .putString(M4AExportWorker.KEY_ARTIST_NAME, projection.metadata.artistName)
-            .putLong(M4AExportWorker.KEY_CLIP_START_MS, 0) // Clipping is already handled by the downloaded segment
+            .putString(M4AExportWorker.KEY_ALBUM_NAME, projection.metadata.title)
+            .putString(M4AExportWorker.KEY_ARTWORK_URI, projection.metadata.specificArtUrl)
+            .putLong(M4AExportWorker.KEY_CLIP_START_MS, 0)
             .putLong(M4AExportWorker.KEY_CLIP_END_MS, projection.metadata.duration * 1000L)
             .build()
 
@@ -212,6 +240,24 @@ class DownloadRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteDownloadById(itemId: String) {
+        // 1. Delete actual file from storage
+        val interaction = unifiedDao.getDownloadInteraction(itemId)
+        interaction?.localFilePath?.let { path ->
+            try {
+                Timber.d("$TAG: Deleting file at $path")
+                val uri = Uri.parse(path)
+                if (uri.scheme == "content") {
+                    context.contentResolver.delete(uri, null, null)
+                } else {
+                    val file = File(path)
+                    if (file.exists()) file.delete()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to delete actual file for $itemId")
+            }
+        }
+
+        // 2. Remove from DB and Media3
         unifiedDao.deleteInteraction(itemId, "DOWNLOAD")
         downloadCache.removeResource(itemId)
         DownloadService.sendRemoveDownload(context, HolodexDownloadService::class.java, itemId, false)
@@ -229,34 +275,19 @@ class DownloadRepositoryImpl @Inject constructor(
 
     override suspend fun reconcileAllDownloads() {
         withContext(Dispatchers.IO) {
-            Timber.i("Reconciling downloads: Checking for zombie states...")
-
-            // 1. Get all items the DB thinks are downloading
             val activeInDb = unifiedDao.getAllDownloadsOneShot().filter {
                 it.downloadStatus == DownloadStatus.DOWNLOADING.name ||
                         it.downloadStatus == DownloadStatus.ENQUEUED.name ||
                         it.downloadStatus == DownloadStatus.PROCESSING.name
             }
-
-            // 2. Get what Media3 actually knows about
             val actuallyRunning = media3DownloadManager.currentDownloads.map { it.request.id }.toSet()
-
-            var fixedCount = 0
             for (item in activeInDb) {
-                // If DB says downloading, but Media3 doesn't know about it, it's a zombie.
                 if (!actuallyRunning.contains(item.itemId)) {
-                    Timber.w("Found zombie download: ${item.itemId}. Marking as FAILED.")
                     unifiedDao.updateDownloadStatus(item.itemId, DownloadStatus.FAILED.name)
-                    fixedCount++
                 }
-            }
-
-            if (fixedCount > 0) {
-                Timber.i("Reconciliation complete. Fixed $fixedCount zombie downloads.")
             }
         }
     }
-
 
     override suspend fun rescanStorageForDownloads() {
         withContext(Dispatchers.IO) {

@@ -1,4 +1,3 @@
-// File: java/com/example/holodex/playback/util/PlayerStateMapper.kt
 package com.example.holodex.playback.util
 
 import androidx.media3.common.Player
@@ -11,12 +10,13 @@ object PlayerStateMapper {
     fun mapExoPlayerStateToDomain(playbackState: Int, playWhenReady: Boolean): DomainPlaybackState {
         return when (playbackState) {
             Player.STATE_IDLE -> DomainPlaybackState.IDLE
-            Player.STATE_BUFFERING -> DomainPlaybackState.BUFFERING
-            Player.STATE_READY -> if (playWhenReady) DomainPlaybackState.PLAYING else DomainPlaybackState.PAUSED
             Player.STATE_ENDED -> DomainPlaybackState.ENDED
+            Player.STATE_BUFFERING -> if (playWhenReady) DomainPlaybackState.BUFFERING else DomainPlaybackState.PAUSED
+            Player.STATE_READY -> if (playWhenReady) DomainPlaybackState.PLAYING else DomainPlaybackState.PAUSED
             else -> DomainPlaybackState.IDLE
         }
     }
+
     @Player.RepeatMode
     fun mapDomainRepeatModeToExoPlayer(domainMode: DomainRepeatMode): Int {
         return when (domainMode) {

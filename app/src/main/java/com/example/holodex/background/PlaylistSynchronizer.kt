@@ -2,12 +2,12 @@
 package com.example.holodex.background
 
 import com.example.holodex.data.db.SyncStatus
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.PlaylistRepository
 import timber.log.Timber
 import javax.inject.Inject
 
 class PlaylistSynchronizer @Inject constructor(
-    private val repository: HolodexRepository,
+    private val repository: PlaylistRepository,
     private val logger: SyncLogger
 ) : ISynchronizer {
     override val name: String = "PLAYLISTS"

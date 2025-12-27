@@ -2,23 +2,26 @@ package com.example.holodex.viewmodel
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.media3.common.util.UnstableApi
+import androidx.lifecycle.viewModelScope
 import com.example.holodex.data.model.discovery.DiscoveryChannel
-import com.example.holodex.data.repository.HolodexRepository
+import com.example.holodex.data.repository.FeedRepository
+import com.example.holodex.data.repository.PlaylistRepository
 import com.example.holodex.data.repository.UnifiedVideoRepository
 import com.example.holodex.viewmodel.mappers.toUnifiedDisplayItem
-import com.example.holodex.viewmodel.mappers.toVideoShell
+import com.example.holodex.viewmodel.mappers.toVideoShell // <--- ADDED IMPORT
+import com.example.holodex.viewmodel.state.BrowseFilterState
+import com.example.holodex.viewmodel.state.ViewTypePreset
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.first
-import org.orbitmvi.orbit.Container
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import org.mobilenativefoundation.store.store5.StoreReadResponse
 import org.orbitmvi.orbit.ContainerHost
 import org.orbitmvi.orbit.viewmodel.container
 import timber.log.Timber
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import javax.inject.Inject
-
-// --- STATE & SIDE EFFECT DEFINITIONS ---
 
 data class FullListState(
     val items: List<Any> = emptyList(),
@@ -32,15 +35,13 @@ sealed class FullListSideEffect {
     data class ShowToast(val message: String) : FullListSideEffect()
 }
 
-// ---------------------------------------
-
-@UnstableApi
 @HiltViewModel
 class FullListViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
-    private val holodexRepository: HolodexRepository,
-    private val unifiedRepository: UnifiedVideoRepository,
-    ) : ContainerHost<FullListState, FullListSideEffect>, ViewModel() {
+    private val playlistRepository: PlaylistRepository,
+    private val feedRepository: FeedRepository,
+    private val unifiedRepository: UnifiedVideoRepository
+) : ContainerHost<FullListState, FullListSideEffect>, ViewModel() {
 
     companion object {
         const val CATEGORY_TYPE_ARG = "category"
@@ -56,75 +57,87 @@ class FullListViewModel @Inject constructor(
         StandardCharsets.UTF_8.toString()
     )
 
-    override val container: Container<FullListState, FullListSideEffect> = container(FullListState()) {
+    override val container = container<FullListState, FullListSideEffect>(FullListState()) {
         loadMore(isInitialLoad = true)
     }
 
     fun loadMore(isInitialLoad: Boolean = false) = intent {
         if (!isInitialLoad && (state.isLoadingMore || state.endOfList)) return@intent
 
-        reduce {
-            state.copy(
-                isLoadingInitial = isInitialLoad,
-                isLoadingMore = !isInitialLoad
-            )
+        reduce { state.copy(isLoadingInitial = isInitialLoad, isLoadingMore = !isInitialLoad) }
+
+        if (categoryType == MusicCategoryType.RECENT_STREAMS || categoryType == MusicCategoryType.UPCOMING_MUSIC) {
+            loadFromStore(isInitialLoad)
+        } else {
+            loadFromLegacyRepository(isInitialLoad)
+        }
+    }
+
+    private fun loadFromStore(isInitialLoad: Boolean) = intent {
+        val filter = when(categoryType) {
+            MusicCategoryType.UPCOMING_MUSIC -> BrowseFilterState.create(ViewTypePreset.UPCOMING_STREAMS, organization)
+            else -> BrowseFilterState.create(ViewTypePreset.LATEST_STREAMS, organization)
         }
 
+        feedRepository.getFeed(
+            filter = filter,
+            offset = state.currentOffset,
+            refresh = isInitialLoad
+        ).onEach { response ->
+            when(response) {
+                is StoreReadResponse.Data -> {
+                    val newItems = response.value ?: emptyList()
+                    reduce {
+                        val currentList = if (isInitialLoad) emptyList() else state.items
+                        val newItemsUnique = if (isInitialLoad) newItems else newItems.filter { newItem -> currentList.none { (it as? UnifiedDisplayItem)?.videoId == newItem.videoId } }
+
+                        state.copy(
+                            items = currentList + newItemsUnique,
+                            currentOffset = state.currentOffset + newItems.size,
+                            endOfList = newItems.size < PAGE_SIZE,
+                            isLoadingInitial = false, isLoadingMore = false
+                        )
+                    }
+                }
+                is StoreReadResponse.Error -> {
+                    reduce { state.copy(isLoadingInitial = false, isLoadingMore = false) }
+                    postSideEffect(FullListSideEffect.ShowToast(response.errorMessageOrNull() ?: "Error loading list"))
+                }
+                else -> {}
+            }
+        }.launchIn(viewModelScope)
+    }
+
+    private fun loadFromLegacyRepository(isInitialLoad: Boolean) = intent {
         val offset = if (isInitialLoad) 0 else state.currentOffset
 
         val result: Result<Any> = runCatching {
             when (categoryType) {
-                MusicCategoryType.TRENDING -> holodexRepository.getHotSongsForCarousel(organization.takeIf { it != "All Vtubers" }).getOrThrow()
-                MusicCategoryType.UPCOMING_MUSIC -> holodexRepository.getUpcomingMusicPaginated(
-                    org = organization.takeIf { it != "All Vtubers" },
-                    offset = offset
-                ).getOrThrow()
-                MusicCategoryType.RECENT_STREAMS -> holodexRepository.getLatestSongsPaginated(offset = offset, limit = PAGE_SIZE).getOrThrow()
-                MusicCategoryType.COMMUNITY_PLAYLISTS -> holodexRepository.getOrgPlaylistsPaginated(
+                MusicCategoryType.TRENDING -> playlistRepository.getHotSongsForCarousel(organization.takeIf { it != "All Vtubers" }).getOrThrow()
+                MusicCategoryType.COMMUNITY_PLAYLISTS -> playlistRepository.getOrgPlaylistsPaginated(
                     org = organization, type = "ugp", offset = offset, limit = PAGE_SIZE
                 ).getOrThrow()
-                MusicCategoryType.ARTIST_RADIOS -> holodexRepository.getOrgPlaylistsPaginated(
+                MusicCategoryType.ARTIST_RADIOS -> playlistRepository.getOrgPlaylistsPaginated(
                     org = organization, type = "radio", offset = offset, limit = PAGE_SIZE
                 ).getOrThrow()
-                MusicCategoryType.SYSTEM_PLAYLISTS -> holodexRepository.getOrgPlaylistsPaginated(
+                MusicCategoryType.SYSTEM_PLAYLISTS -> playlistRepository.getOrgPlaylistsPaginated(
                     org = organization, type = "sgp", offset = offset, limit = PAGE_SIZE
                 ).getOrThrow()
-                MusicCategoryType.DISCOVER_CHANNELS -> holodexRepository.getOrgChannelsPaginated(
+                MusicCategoryType.DISCOVER_CHANNELS -> playlistRepository.getOrgChannelsPaginated(
                     org = organization, offset = offset, limit = PAGE_SIZE
                 ).getOrThrow()
-                else -> throw NotImplementedError("Category $categoryType not implemented")
+                else -> throw NotImplementedError("Category $categoryType not implemented in Legacy")
             }
         }
 
+        val likedIds = unifiedRepository.observeLikedItemIds().first()
+        val downloadedIds = unifiedRepository.observeDownloadedIds().first()
+
         result.onSuccess { response ->
-            val likedIds = holodexRepository.likedItemIds.first()
-
-            // FIX: Use Unified Repository for downloads
-            val downloadedIds = unifiedRepository.getDownloads().first().map { it.playbackItemId }.toSet()
-
             val newItems: List<Any> = when (response) {
                 is List<*> -> {
                     @Suppress("UNCHECKED_CAST")
                     (response as List<com.example.holodex.data.model.discovery.MusicdexSong>).map { song ->
-                        // FIX: Ensure toVideoShell is imported
-                        val videoShell = song.toVideoShell()
-                        song.toUnifiedDisplayItem(
-                            parentVideo = videoShell,
-                            isLiked = likedIds.contains("${song.videoId}_${song.start}"),
-                            isDownloaded = downloadedIds.contains("${song.videoId}_${song.start}")
-                        )
-                    }
-                }
-                is com.example.holodex.data.cache.FetcherResult<*> -> {
-                    (response.data as List<com.example.holodex.data.model.HolodexVideoItem>).map { video ->
-                        video.toUnifiedDisplayItem(
-                            isLiked = likedIds.contains(video.id),
-                            downloadedSegmentIds = downloadedIds
-                        )
-                    }
-                }
-                is com.example.holodex.data.api.PaginatedSongsResponse -> {
-                    response.items.map { song ->
                         val videoShell = song.toVideoShell()
                         song.toUnifiedDisplayItem(
                             parentVideo = videoShell,
@@ -147,7 +160,6 @@ class FullListViewModel @Inject constructor(
                 val allChannels = (currentChannels + incomingChannels).distinctBy { it.id }
 
                 val grouped = allChannels.groupBy { it.suborg?.takeIf { s -> s.isNotBlank() } ?: organization }
-
                 val groupedList = mutableListOf<Any>()
                 grouped.keys.sorted().forEach { header ->
                     groupedList.add(SubOrgHeader(header))
@@ -169,7 +181,6 @@ class FullListViewModel @Inject constructor(
                     isLoadingMore = false
                 )
             }
-
         }.onFailure { error ->
             Timber.e(error, "Error loading full list")
             postSideEffect(FullListSideEffect.ShowToast("Failed to load data"))
