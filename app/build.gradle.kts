@@ -34,7 +34,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0.5"
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val discordClientId = localProperties.getProperty("DISCORD_CLIENT_ID") ?: ""
         val discordRedirectUri = localProperties.getProperty("DISCORD_REDIRECT_URI") ?: ""
