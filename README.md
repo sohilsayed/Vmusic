@@ -1,4 +1,4 @@
-# Holodex Music 🎵
+# Vmusic 🎵
 
 An Android music streaming client for VTuber content, powered by Holodex and NewPipe Extractor.
 
